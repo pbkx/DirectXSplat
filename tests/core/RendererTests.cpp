@@ -35,6 +35,7 @@ namespace {
 using Microsoft::WRL::ComPtr;
 
 constexpr float kShC0 = 0.28209479177387814f;
+constexpr float kShC1 = 0.4886025119029199f;
 
 struct OffscreenFrame {
   ComPtr<ID3D12Resource> colorTexture;
@@ -499,6 +500,26 @@ Scene MakeTinyScene() {
   set.name = "tiny";
   set.gaussians.push_back(MakeGaussian({-0.2f, 0.0f, 2.5f}, 1.0f, 0.2f, 0.2f));
   set.gaussians.push_back(MakeGaussian({0.2f, 0.0f, 2.8f}, 0.2f, 1.0f, 0.2f));
+  scene.splatSets.push_back(std::move(set));
+  return scene;
+}
+
+Scene MakeDirectionalShScene() {
+  Scene scene{};
+  GaussianSet set{};
+  set.name = "directional-sh";
+  const float directional = (0.5f - 1.25f) / kShC1;
+  auto addGaussian = [&](const Vec3& position) {
+    Gaussian gaussian = MakeGaussian(position, 1.25f, 1.25f, 1.25f);
+    gaussian.scale = {0.45f, 0.45f, 0.45f};
+    gaussian.opacity = 8.0f;
+    gaussian.sh[2] = directional;
+    gaussian.sh[18] = directional;
+    gaussian.sh[34] = directional;
+    set.gaussians.push_back(gaussian);
+  };
+  addGaussian({-0.2f, 0.0f, 2.5f});
+  addGaussian({0.2f, 0.0f, 2.8f});
   scene.splatSets.push_back(std::move(set));
   return scene;
 }
@@ -1147,7 +1168,7 @@ TEST_CASE("Renderer renders every VRAM format combination") {
 
   for (VramAttributeFormat rgbaFormat : formats) {
     for (VramAttributeFormat shFormat : formats) {
-      Scene scene = MakeTinyScene();
+      Scene scene = MakeDirectionalShScene();
       scene.vramFormat = {rgbaFormat, shFormat};
       UploadedSceneHandle sceneHandle{};
       REQUIRE(harness.renderer().CreateUploadedScene(scene, sceneHandle).ok);
@@ -1164,7 +1185,12 @@ TEST_CASE("Renderer renders every VRAM format combination") {
       REQUIRE(harness.ExecuteAndWait(renderResult.submission.uploadSyncPoint).ok);
       const std::vector<uint8_t> pixels = harness.ReadbackColor(frame);
       REQUIRE_FALSE(pixels.empty());
-      CHECK(CountNonZeroPixels(pixels) > 0u);
+      uint8_t peakColor = 0;
+      for (size_t i = 0; i + 3u < pixels.size(); i += 4u) {
+        peakColor = std::max({peakColor, pixels[i], pixels[i + 1u], pixels[i + 2u]});
+      }
+      CHECK(peakColor > 100u);
+      CHECK(peakColor < 155u);
       REQUIRE(harness.renderer().DestroyUploadedScene(sceneHandle).ok);
     }
   }

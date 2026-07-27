@@ -1295,14 +1295,11 @@ Status GaussianRasterPipeline::BuildChunkRuntime(uint64_t chunkId,
     StoreU32(gaussians, base + 16u, PackSnorm16Pair(q.x, q.y));
     StoreU32(gaussians, base + 20u, PackSnorm16Pair(q.z, q.w));
 
-    const float baseColorR = std::clamp(0.5f + g.sh[0] * 0.28209479177387814f, 0.0f, 1.0f);
-    const float baseColorG = std::clamp(0.5f + g.sh[16] * 0.28209479177387814f, 0.0f, 1.0f);
-    const float baseColorB = std::clamp(0.5f + g.sh[32] * 0.28209479177387814f, 0.0f, 1.0f);
     const float opacity = 1.0f / (1.0f + std::exp(-std::clamp(g.opacity, -20.0f, 20.0f)));
 
-    StoreAttributeFloat(gaussians, base + rgbaOffset + 0u * rgbaElementBytes, format.rgbaFormat, baseColorR, false);
-    StoreAttributeFloat(gaussians, base + rgbaOffset + 1u * rgbaElementBytes, format.rgbaFormat, baseColorG, false);
-    StoreAttributeFloat(gaussians, base + rgbaOffset + 2u * rgbaElementBytes, format.rgbaFormat, baseColorB, false);
+    StoreAttributeFloat(gaussians, base + rgbaOffset + 0u * rgbaElementBytes, format.rgbaFormat, g.sh[0], true);
+    StoreAttributeFloat(gaussians, base + rgbaOffset + 1u * rgbaElementBytes, format.rgbaFormat, g.sh[16], true);
+    StoreAttributeFloat(gaussians, base + rgbaOffset + 2u * rgbaElementBytes, format.rgbaFormat, g.sh[32], true);
     StoreAttributeFloat(gaussians, base + rgbaOffset + 3u * rgbaElementBytes, format.rgbaFormat, opacity, false);
 
     uint32_t dstCoeff = 0;

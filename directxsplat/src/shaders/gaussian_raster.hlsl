@@ -133,9 +133,9 @@ uint AttributeBytes(uint format) {
 float4 DecodeSceneGaussianRgba(uint index) {
   const uint elementBytes = AttributeBytes(gRgbaFormat);
   return float4(
-      LoadPackedAttribute(index, gRgbaOffset + 0u * elementBytes, gRgbaFormat, false),
-      LoadPackedAttribute(index, gRgbaOffset + 1u * elementBytes, gRgbaFormat, false),
-      LoadPackedAttribute(index, gRgbaOffset + 2u * elementBytes, gRgbaFormat, false),
+      LoadPackedAttribute(index, gRgbaOffset + 0u * elementBytes, gRgbaFormat, true),
+      LoadPackedAttribute(index, gRgbaOffset + 1u * elementBytes, gRgbaFormat, true),
+      LoadPackedAttribute(index, gRgbaOffset + 2u * elementBytes, gRgbaFormat, true),
       LoadPackedAttribute(index, gRgbaOffset + 3u * elementBytes, gRgbaFormat, false));
 }
 
@@ -165,7 +165,7 @@ void DecodeSceneGaussianBase(uint index,
 }
 
 float3 DecodeSceneGaussianDcColor(uint index) {
-  return saturate(DecodeSceneGaussianRgba(index).rgb);
+  return 0.5f + 0.28209479177387814f * DecodeSceneGaussianRgba(index).rgb;
 }
 
 void DecodeSceneGaussianShRest(uint index, out float sh[45]) {
@@ -224,7 +224,7 @@ float3 EvalSh(float3 baseColor, float sh[45], float3 dir, uint degree) {
     c.y += sh[15u + ci] * b[i];
     c.z += sh[30u + ci] * b[i];
   }
-  return max(c, 0.0);
+  return c;
 }
 
 float3 ViewVector(float3 v) {
@@ -451,7 +451,7 @@ bool BuildRasterGaussian(uint sceneIndex, out RasterGaussian outG) {
     float3 viewDir = len2 > 1e-10 ? normalize(viewDelta) : float3(0, 0, 1);
     color = saturate(EvalSh(dcColor, sh, viewDir, gShadingDegree));
   } else {
-    color = dcColor;
+    color = saturate(dcColor);
   }
 
   outG.clipPos = clip;

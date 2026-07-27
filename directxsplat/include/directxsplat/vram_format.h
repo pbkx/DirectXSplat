@@ -52,7 +52,7 @@ constexpr uint32_t AlignPackedOffset4(uint32_t value) {
 constexpr uint32_t EstimatePackedGaussianStrideBytes(VramFormatSettings settings) {
   settings = SanitizeVramFormatSettings(settings);
   constexpr uint32_t commonBytes = 24u;  // position, scale/filter, rotation
-  constexpr uint32_t shCoeffCount = 45u; // degree 1-3 RGB coefficients, DC is stored in RGBA.rgb
+  constexpr uint32_t shCoeffCount = 45u; // Degree 1-3 RGB coefficients; SH DC is in RGBA.rgb and opacity is in RGBA.a.
   const uint32_t rgbaBytes = 4u * AttributeFormatSizeBytes(settings.rgbaFormat);
   const uint32_t shOffset = AlignPackedOffset4(commonBytes + rgbaBytes);
   const uint32_t idOffset = AlignPackedOffset4(shOffset + shCoeffCount * AttributeFormatSizeBytes(settings.shFormat));
