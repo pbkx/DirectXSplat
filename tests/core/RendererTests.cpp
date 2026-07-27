@@ -811,6 +811,59 @@ TEST_CASE("Renderer rejects stale and invalid frame contexts") {
   expectRejected(stale);
 }
 
+TEST_CASE("Renderer rejects reused in-flight submission fence values") {
+  RenderHarness harness;
+  const Status init = harness.Initialize();
+  REQUIRE_MESSAGE(init.ok, init.message);
+
+  UploadedSceneHandle sceneHandle{};
+  REQUIRE(harness.renderer().CreateUploadedScene(MakeTinyScene(), sceneHandle).ok);
+  const RenderInput input = MakeRenderInput(64, 64);
+  RenderFrameContext frameContext = harness.FrameContext();
+  frameContext.submissionFenceValue = 2;
+
+  RenderPreparationResult preparation{};
+  REQUIRE(harness.renderer().PrepareSceneForRender(sceneHandle, input, frameContext, &preparation).ok);
+
+  OffscreenFrame frame{};
+  REQUIRE(harness.CreateOffscreenFrame(64, 64, frame).ok);
+  REQUIRE(harness.ResetCommandList().ok);
+
+  RenderResult renderResult{};
+  REQUIRE(harness.renderer().Render(harness.commandList(),
+                                    frame.binding,
+                                    sceneHandle,
+                                    input,
+                                    frameContext,
+                                    renderResult)
+              .ok);
+  CHECK(renderResult.submission.submissionRequired);
+
+  RenderFrameContext duplicate = frameContext;
+  duplicate.frameIndex++;
+  RenderResult duplicateResult{};
+  CHECK_FALSE(harness.renderer().Render(harness.commandList(),
+                                        frame.binding,
+                                        sceneHandle,
+                                        input,
+                                        duplicate,
+                                        duplicateResult)
+                  .ok);
+
+  RenderFrameContext decreasing = frameContext;
+  decreasing.submissionFenceValue--;
+  decreasing.frameIndex += 2;
+  UploadedSceneGpuResources resources{};
+  CHECK_FALSE(harness.renderer().AcquireUploadedSceneGpuResources(sceneHandle, decreasing, resources).ok);
+
+  REQUIRE(harness.ExecuteCommandList(harness.commandList(),
+                                     renderResult.submission.uploadSyncPoint,
+                                     frameContext.submissionFenceValue)
+              .ok);
+  REQUIRE(harness.WaitForSubmittedWork().ok);
+  REQUIRE(harness.renderer().DestroyUploadedScene(sceneHandle).ok);
+}
+
 TEST_CASE("Renderer renders one uploaded scene across queued frames") {
   RenderHarness harness;
   const Status init = harness.Initialize();

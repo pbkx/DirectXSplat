@@ -390,6 +390,7 @@ Status GaussianRasterPipeline::ShutdownInternal(bool deviceLostCleanup) {
     deviceLost_ = false;
   }
   directQueueCompletedFenceValue_ = 0;
+  directQueueReservedFenceValue_ = 0;
   directQueueSubmittedFenceValue_ = 0;
   directQueueFence_.Reset();
   gpuTimingEnabled_ = true;
@@ -615,7 +616,8 @@ Status GaussianRasterPipeline::ReleaseUploadResource(ComPtr<ID3D12Resource>& res
   return RetireResource(resource);
 }
 
-Status GaussianRasterPipeline::ValidateRenderFrameContext(const RenderFrameContext* frameContext) {
+Status GaussianRasterPipeline::ValidateRenderFrameContext(const RenderFrameContext* frameContext,
+                                                          bool reserveSubmission) {
   if (frameContext == nullptr || frameContext->fence == nullptr || frameContext->submissionFenceValue == 0) {
     return Status::Error("render frame context requires a fence and submission value");
   }
@@ -633,6 +635,12 @@ Status GaussianRasterPipeline::ValidateRenderFrameContext(const RenderFrameConte
   }
   if (directQueueFence_.Get() != frameContext->fence) {
     return Status::Error("render frame context fence changed");
+  }
+  if (reserveSubmission) {
+    if (frameContext->submissionFenceValue <= directQueueReservedFenceValue_) {
+      return Status::Error("render frame context submission value was already reserved");
+    }
+    directQueueReservedFenceValue_ = frameContext->submissionFenceValue;
   }
   return Status::Ok();
 }
@@ -2767,7 +2775,7 @@ Status GaussianRasterPipeline::GetSceneGpuResources(uint64_t sceneId,
                                                     bool acquireLease,
                                                     UploadedSceneGpuResources& out) try {
   out = {};
-  Status frameStatus = ValidateRenderFrameContext(frameContext);
+  Status frameStatus = ValidateRenderFrameContext(frameContext, false);
   if (!frameStatus.ok) {
     return frameStatus;
   }
@@ -2782,6 +2790,12 @@ Status GaussianRasterPipeline::GetSceneGpuResources(uint64_t sceneId,
   }
   if (runtime == nullptr) {
     return Status::Error("uploaded scene handle not found");
+  }
+  if (acquireLease) {
+    frameStatus = ValidateRenderFrameContext(frameContext, true);
+    if (!frameStatus.ok) {
+      return frameStatus;
+    }
   }
   std::lock_guard<std::mutex> runtimeLock(*runtime->mutex);
   out.scene = UploadedSceneHandle{sceneId};
@@ -3104,7 +3118,7 @@ Status GaussianRasterPipeline::Render(ID3D12GraphicsCommandList* commandList,
   if (target.colorRtv.ptr == 0) {
     return Status::Error("invalid render target binding");
   }
-  Status frameStatus = ValidateRenderFrameContext(frameContext);
+  Status frameStatus = ValidateRenderFrameContext(frameContext, false);
   if (!frameStatus.ok) {
     return frameStatus;
   }
@@ -3120,6 +3134,10 @@ Status GaussianRasterPipeline::Render(ID3D12GraphicsCommandList* commandList,
   }
   if (runtimePtr == nullptr) {
     return Status::Error("uploaded scene handle not found");
+  }
+  frameStatus = ValidateRenderFrameContext(frameContext, true);
+  if (!frameStatus.ok) {
+    return frameStatus;
   }
   UploadedSceneRuntime& runtime = *runtimePtr;
   const uint64_t plannedPairTarget = std::max<uint64_t>(std::max<uint64_t>(runtime.sceneGaussianCount, 1u) * kSortPairMultiplier,

@@ -296,7 +296,7 @@ class GaussianRasterPipeline {
   Status RetireResource(Microsoft::WRL::ComPtr<ID3D12Resource>& resource);
   Status ReleaseUploadResource(Microsoft::WRL::ComPtr<ID3D12Resource>& resource, void*& mappedPtr, size_t& capacityBytes);
   void CollectRetiredResources(uint64_t completedFenceValue);
-  Status ValidateRenderFrameContext(const RenderFrameContext* frameContext);
+  Status ValidateRenderFrameContext(const RenderFrameContext* frameContext, bool reserveSubmission);
   void UpdateDirectQueueFenceProgress(const RenderFrameContext* frameContext);
   void RecordDirectQueueSubmission(const RenderFrameContext* frameContext);
   uint64_t CurrentCompletedDirectFenceValue() const;
@@ -401,6 +401,7 @@ class GaussianRasterPipeline {
   HANDLE uploadFenceEvent_ = nullptr;
   uint64_t uploadFenceValue_ = 0;
   uint64_t directQueueCompletedFenceValue_ = 0;
+  uint64_t directQueueReservedFenceValue_ = 0;
   uint64_t directQueueSubmittedFenceValue_ = 0;
   Microsoft::WRL::ComPtr<ID3D12Fence> directQueueFence_;
   double gpuTimestampMsPerTick_ = 0.0;
