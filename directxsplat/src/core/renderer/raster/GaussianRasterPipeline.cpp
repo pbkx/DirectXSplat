@@ -1782,6 +1782,9 @@ Status GaussianRasterPipeline::DestroyScene(uint64_t sceneId) {
   lock.lock();
   uploadedScenes_.erase(sceneId);
   lock.unlock();
+  // Renderer waits for this scene's direct queue fence before destruction.
+  // Collect now so an idle application does not retain completed resources.
+  CollectRetiredResources(CurrentCompletedDirectFenceValue());
   return Status::Ok();
 }
 
