@@ -141,7 +141,7 @@ class GaussianRasterPipeline {
     uint32_t rgbaOffset = 24;
     uint32_t shOffset = 32;
     uint32_t idOffset = 124;
-    uint32_t pad3 = 0;
+    uint32_t chunkDispatchStride = 0;
   };
   static_assert(sizeof(PrepConstants) == 272);
 

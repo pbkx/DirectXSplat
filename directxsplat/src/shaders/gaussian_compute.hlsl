@@ -47,7 +47,7 @@ cbuffer PrepConstants : register(b0) {
   uint gRgbaOffset;
   uint gShOffset;
   uint gIdOffset;
-  uint gPad3;
+  uint gChunkDispatchStride;
 };
 
 ByteAddressBuffer gSceneGaussians : register(t0);
@@ -315,7 +315,7 @@ void CSPrepare(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadI
   uint idx = 0u;
   float viewDepth = 0.0f;
   float projectedAlpha = 0.0f;
-  uint chunkIndex = groupId.y;
+  uint chunkIndex = groupId.z * gChunkDispatchStride + groupId.y;
   if (chunkIndex < gSetCount) {
     ChunkPrepGpu chunkPrep = gChunkPrep[chunkIndex];
     SetParamsGpu sp = chunkPrep.params;

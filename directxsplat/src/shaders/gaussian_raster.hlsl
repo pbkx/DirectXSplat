@@ -58,7 +58,7 @@ cbuffer PrepConstants : register(b0) {
   uint gRgbaOffset;
   uint gShOffset;
   uint gIdOffset;
-  uint gPad3;
+  uint gChunkDispatchStride;
 };
 
 ByteAddressBuffer gSceneGaussians : register(t0);

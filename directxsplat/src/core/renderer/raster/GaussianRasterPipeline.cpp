@@ -3435,6 +3435,9 @@ Status GaussianRasterPipeline::Render(ID3D12GraphicsCommandList* commandList,
   prepBase.sceneCount = runtime.sceneAtlasTail;
   prepBase.paddedCount = runtime.maxPrepareGroups;
   prepBase.setCount = runtime.batchedChunkCount;
+  const renderer_internal::PrepareDispatchGrid prepareDispatch =
+      renderer_internal::PlanPrepareDispatch(runtime.batchedChunkCount);
+  prepBase.chunkDispatchStride = prepareDispatch.groupsY;
 
   if (scratch->prepConstantsMapped == nullptr || scratch->prepConstantsUpload == nullptr || runtime.sceneAtlasBuffer == nullptr ||
       runtime.batchedChunkParamsUpload == nullptr || runtime.sceneIndexToChunkBuffer == nullptr) {
@@ -3487,8 +3490,8 @@ Status GaussianRasterPipeline::Render(ID3D12GraphicsCommandList* commandList,
   commandList->SetComputeRootConstantBufferView(0, scratch->prepConstantsUpload->GetGPUVirtualAddress());
   commandList->SetComputeRootShaderResourceView(1, runtime.sceneAtlasBuffer->GetGPUVirtualAddress());
   commandList->SetComputeRootShaderResourceView(2, runtime.batchedChunkParamsUpload->GetGPUVirtualAddress());
-  if (runtime.batchedChunkCount > 0 && runtime.maxPrepareGroups > 0) {
-    commandList->Dispatch(runtime.maxPrepareGroups, runtime.batchedChunkCount, 1);
+  if (prepareDispatch.groupsY > 0 && prepareDispatch.groupsZ > 0 && runtime.maxPrepareGroups > 0) {
+    commandList->Dispatch(runtime.maxPrepareGroups, prepareDispatch.groupsY, prepareDispatch.groupsZ);
   }
 
   barrier.UAV.pResource = scratch->visibleCounterBuffer.Get();
