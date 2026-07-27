@@ -1,5 +1,6 @@
 #include "renderer/Renderer.h"
 
+#include "renderer/RendererLimits.h"
 #include "renderer/raster/GaussianRasterPipeline.h"
 
 #include <Windows.h>
@@ -32,7 +33,7 @@ constexpr uint64_t kFullResolutionSceneLimit = 2ull * 1024ull * 1024ull;
 constexpr uint32_t kHierarchyLeafGroupTarget = 8;
 constexpr float kHierarchyMidDescendRadius = 18.0f;
 constexpr float kHierarchyNearDescendRadius = 48.0f;
-constexpr uint64_t kMaxResidencySceneGaussians = 64ull * 1024ull * 1024ull;
+constexpr uint64_t kMaxResidencySceneGaussians = renderer_internal::kMaxSceneGaussians;
 constexpr uint64_t kMaxResidencyChunks = 1024ull * 1024ull;
 constexpr uint64_t kDefaultResidencyChunkExpandedBytes = 64ull * 1024ull * 1024ull;
 constexpr uint64_t kMaxResidencyChunkExpandedBytes = 2ull * 1024ull * 1024ull * 1024ull;

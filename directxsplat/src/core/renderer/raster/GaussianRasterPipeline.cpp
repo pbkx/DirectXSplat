@@ -14,6 +14,7 @@
 
 #include <DirectXPackedVector.h>
 
+#include "renderer/RendererLimits.h"
 #include "renderer/sort/OneSweep.h"
 
 namespace directxsplat {
@@ -23,9 +24,6 @@ namespace {
 using Microsoft::WRL::ComPtr;
 using DirectX::PackedVector::XMConvertFloatToHalf;
 
-constexpr uint32_t kSortPairMultiplier = 1u;
-constexpr uint32_t kMinSortPairCapacity = 1024;
-constexpr uint32_t kMaxSortPairCapacity = 16u * 1024u * 1024u;
 constexpr uint32_t kOneSweepRadix = 256u;
 constexpr uint32_t kOneSweepPassCount = 4u;
 constexpr uint32_t kOneSweepIndirectCommandStride = sizeof(uint32_t) * 7u;
@@ -36,7 +34,6 @@ constexpr uint32_t kOneSweepDigitCommandIndex = 3u;
 constexpr uint32_t kSortIndirectCommandCount = kOneSweepDigitCommandIndex + kOneSweepPassCount;
 constexpr uint32_t kSortStatsReadbackPeriod = 1;
 constexpr float kPackedMipFilterFraction = 0.18f;
-constexpr uint32_t kMaxSceneIndexToChunkEntries = 64u * 1024u * 1024u;
 constexpr uint32_t kSplatAlphaHistogramBins = 50u;
 constexpr uint32_t kSplatAlphaHistogramOffset = 8u;
 constexpr uint32_t kSplatAlphaHistogramBytes = kSplatAlphaHistogramBins * sizeof(uint32_t);
@@ -1523,12 +1520,8 @@ Status GaussianRasterPipeline::UpdateSceneCapacity(UploadedSceneRuntime& runtime
   runtime.batchedChunkCount = static_cast<uint32_t>(runtime.chunks.size());
   runtime.maxPrepareGroups = maxPrepareGroups;
   runtime.drawCapacity = std::max<uint32_t>(runtime.sceneGaussianCount, 1u);
-  const uint64_t pairMultiplier = kSortPairMultiplier;
-  const uint64_t pairTarget = std::max<uint64_t>(
-      std::max<uint64_t>(runtime.sceneGaussianCount, 1u) * pairMultiplier,
-      static_cast<uint64_t>(kMinSortPairCapacity));
   runtime.sortPairCapacity =
-      static_cast<uint32_t>(std::min<uint64_t>(std::max<uint64_t>(pairTarget, runtime.drawCapacity), kMaxSortPairCapacity));
+      renderer_internal::PlanSortPairCapacity(runtime.sceneGaussianCount, runtime.drawCapacity);
   if (runtime.sceneGaussianCount == 0) {
     return Status::Ok();
   }
@@ -1559,7 +1552,7 @@ Status GaussianRasterPipeline::RefreshScenePrepResources(UploadedSceneRuntime& r
 
   if (runtime.sceneIndexToChunkUploadPending) {
     const uint32_t indexCount = std::max<uint32_t>(runtime.sceneAtlasTail, 1u);
-    if (indexCount > kMaxSceneIndexToChunkEntries) {
+    if (indexCount > renderer_internal::kMaxSceneGaussians) {
       return Status::Error("scene index buffer is too large");
     }
     if (runtime.sceneIndexToChunkBuffer == nullptr || runtime.sceneIndexToChunkCapacity < indexCount) {
@@ -1570,7 +1563,7 @@ Status GaussianRasterPipeline::RefreshScenePrepResources(UploadedSceneRuntime& r
                                      : runtime.sceneIndexToChunkCapacity * 2u;
         newCapacity = std::max<uint32_t>(newCapacity, doubled);
       }
-      newCapacity = std::min<uint32_t>(newCapacity, kMaxSceneIndexToChunkEntries);
+      newCapacity = std::min<uint32_t>(newCapacity, renderer_internal::kMaxSceneGaussians);
       if (newCapacity < indexCount) {
         return Status::Error("scene index buffer is too large");
       }
@@ -2212,7 +2205,7 @@ Status GaussianRasterPipeline::EnsureRenderScratchBuffers(const UploadedSceneRun
   if (scratch.sortPairCapacity > 0) {
     newPairs = std::max<uint64_t>(newPairs, static_cast<uint64_t>(scratch.sortPairCapacity) * 2u);
   }
-  newPairs = std::min<uint64_t>(newPairs, kMaxSortPairCapacity);
+  newPairs = std::min<uint64_t>(newPairs, renderer_internal::kMaxSceneGaussians);
   const uint32_t newDrawCapacity = static_cast<uint32_t>(std::max<uint64_t>(newDraw, requiredDrawCapacity));
   const uint32_t newPairCapacity = static_cast<uint32_t>(std::max<uint64_t>(newPairs, requiredPairCapacity));
   const uint32_t newPartitionCount = std::max<uint32_t>(oneSweep_ != nullptr ? oneSweep_->MaxPartitionsForElementCount(newPairCapacity) : 1u, 1u);
@@ -3128,10 +3121,8 @@ Status GaussianRasterPipeline::Render(ID3D12GraphicsCommandList* commandList,
     return frameStatus;
   }
   UploadedSceneRuntime& runtime = *runtimePtr;
-  const uint64_t plannedPairTarget = std::max<uint64_t>(std::max<uint64_t>(runtime.sceneGaussianCount, 1u) * kSortPairMultiplier,
-                                                        static_cast<uint64_t>(kMinSortPairCapacity));
-  const uint32_t requiredPairCapacity = static_cast<uint32_t>(
-      std::min<uint64_t>(std::max<uint64_t>(plannedPairTarget, runtime.drawCapacity), kMaxSortPairCapacity));
+  const uint32_t requiredPairCapacity =
+      renderer_internal::PlanSortPairCapacity(runtime.sceneGaussianCount, runtime.drawCapacity);
   std::shared_ptr<RenderScratch> scratch;
   Status scratchStatus = AcquireRenderScratch(runtime, requiredPairCapacity, frameContext, scratch);
   if (!scratchStatus.ok) {
