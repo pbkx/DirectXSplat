@@ -2206,8 +2206,15 @@ class Renderer::Impl {
       if (chunk.lodCounts[static_cast<size_t>(baselineLod)] == 0) {
         continue;
       }
+      while (baselineLod < 2 &&
+             selectedCost + chunk.lodCounts[static_cast<size_t>(baselineLod)] > budget) {
+        baselineLod++;
+        while (baselineLod < 2 && chunk.lodCounts[static_cast<size_t>(baselineLod)] == 0) {
+          baselineLod++;
+        }
+      }
       const uint32_t cost = chunk.lodCounts[static_cast<size_t>(baselineLod)];
-      if (selectedCost + cost > budget && selectedCost > 0) {
+      if (cost == 0 || (selectedCost + cost > budget && selectedCost > 0)) {
         continue;
       }
       selectedLods[candidate.index] = baselineLod;
