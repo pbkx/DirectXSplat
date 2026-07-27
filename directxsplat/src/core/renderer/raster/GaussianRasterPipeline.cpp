@@ -511,15 +511,13 @@ Status GaussianRasterPipeline::WaitUploadQueue() {
       }
     }
   }
-  CollectRetiredResources(UINT64_MAX);
+  CollectRetiredResources(directQueueCompletedFenceValue_);
   return Status::Ok();
 }
 
 void GaussianRasterPipeline::CollectRetiredResources(uint64_t completedFenceValue) {
   std::lock_guard<std::recursive_mutex> uploadLock(uploadMutex_);
-  if (completedFenceValue != UINT64_MAX) {
-    directQueueCompletedFenceValue_ = std::max(directQueueCompletedFenceValue_, completedFenceValue);
-  }
+  directQueueCompletedFenceValue_ = std::max(directQueueCompletedFenceValue_, completedFenceValue);
   if (directQueueFence_ != nullptr) {
     directQueueCompletedFenceValue_ = std::max(directQueueCompletedFenceValue_, directQueueFence_->GetCompletedValue());
   }
@@ -528,19 +526,15 @@ void GaussianRasterPipeline::CollectRetiredResources(uint64_t completedFenceValu
     completedUploadFenceValue = uploadFence_->GetCompletedValue();
   }
   const uint64_t completedDirectFenceValue = directQueueCompletedFenceValue_;
-  const bool completeAll = completedFenceValue == UINT64_MAX;
   for (UploadContext& context : uploadContexts_) {
-    if (completeAll || (context.fenceValue != std::numeric_limits<uint64_t>::max() &&
-                        context.fenceValue <= completedUploadFenceValue)) {
+    if (context.fenceValue != std::numeric_limits<uint64_t>::max() &&
+        context.fenceValue <= completedUploadFenceValue) {
       context.submittedDestination.Reset();
     }
   }
   retiredResources_.erase(std::remove_if(retiredResources_.begin(), retiredResources_.end(),
-                                         [completeAll, completedDirectFenceValue, completedUploadFenceValue](
+                                         [completedDirectFenceValue, completedUploadFenceValue](
                                              const RetiredResource& item) {
-                                           if (completeAll) {
-                                             return true;
-                                           }
                                            const bool directComplete =
                                                item.fenceValue == 0 ||
                                                completedDirectFenceValue >= item.fenceValue ||
@@ -553,9 +547,6 @@ void GaussianRasterPipeline::CollectRetiredResources(uint64_t completedFenceValu
                                            return directComplete && uploadComplete;
                                          }),
                           retiredResources_.end());
-  if (completeAll) {
-    untrackedRetiredResources_.clear();
-  }
 }
 
 Status GaussianRasterPipeline::ReserveRetiredResourceSlots(size_t additionalCount) {
