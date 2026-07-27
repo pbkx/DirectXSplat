@@ -166,6 +166,21 @@ TEST_CASE("math reference invariants cover transforms and covariance") {
   CHECK(projected.m[0] > 0.0f);
   CHECK(projected.m[4] > 0.0f);
   CHECK(projected.m[1] == doctest::Approx(projected.m[3]));
+
+  const Mat3 tiltedCovariance =
+      BuildCovariance({2.0f, 3.0f, 4.0f}, {0.0f, 0.38268343f, 0.0f, 0.92387953f});
+  const Mat3 tiltedProjected =
+      ProjectCovarianceToScreen(tiltedCovariance, {0.25f, -0.5f, 4.0f}, 120.0f, 100.0f);
+  Mat3 reflectedCovariance = tiltedCovariance;
+  reflectedCovariance.m[2] = -reflectedCovariance.m[2];
+  reflectedCovariance.m[5] = -reflectedCovariance.m[5];
+  reflectedCovariance.m[6] = -reflectedCovariance.m[6];
+  reflectedCovariance.m[7] = -reflectedCovariance.m[7];
+  const Mat3 reflectedProjected =
+      ProjectCovarianceToScreen(reflectedCovariance, {0.25f, -0.5f, -4.0f}, 120.0f, 100.0f);
+  CHECK(reflectedProjected.m[0] == doctest::Approx(tiltedProjected.m[0]));
+  CHECK(reflectedProjected.m[1] == doctest::Approx(tiltedProjected.m[1]));
+  CHECK(reflectedProjected.m[4] == doctest::Approx(tiltedProjected.m[4]));
 }
 
 }  // namespace directxsplat

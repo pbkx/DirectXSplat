@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <future>
@@ -524,6 +525,22 @@ Scene MakeDirectionalShScene() {
   return scene;
 }
 
+Scene MakeAnisotropicScene() {
+  Scene scene{};
+  GaussianSet set{};
+  set.name = "anisotropic";
+  auto addGaussian = [&](const Vec3& position, float angle) {
+    Gaussian gaussian = MakeGaussian(position, 0.8f, 0.5f, 0.2f);
+    gaussian.scale = {0.08f, 0.35f, 0.65f};
+    gaussian.rotation = {0.0f, std::sin(angle * 0.5f), 0.0f, std::cos(angle * 0.5f)};
+    set.gaussians.push_back(gaussian);
+  };
+  addGaussian({-0.25f, 0.1f, 2.5f}, 0.75f);
+  addGaussian({0.35f, -0.15f, 3.0f}, -0.6f);
+  scene.splatSets.push_back(std::move(set));
+  return scene;
+}
+
 Scene MakeSceneWithColor(float x, float r, float g, float b) {
   Scene scene{};
   GaussianSet set{};
@@ -948,6 +965,45 @@ TEST_CASE("Renderer prepares negative view-space Z residency") {
   REQUIRE(harness.renderer().PrepareSceneForRender(sceneHandle, input, harness.FrameContext(), &preparation).ok);
   CHECK(preparation.stats.residentGaussians == 2u);
   CHECK(preparation.stats.residentChunks == 1u);
+}
+
+TEST_CASE("Renderer preserves projected covariance with negative view-space Z") {
+  RenderHarness harness;
+  const Status init = harness.Initialize();
+  REQUIRE_MESSAGE(init.ok, init.message);
+
+  UploadedSceneHandle sceneHandle{};
+  REQUIRE(harness.renderer().CreateUploadedScene(MakeAnisotropicScene(), sceneHandle).ok);
+
+  auto render = [&](bool positiveViewSpaceZ) {
+    RenderInput input = MakeRenderInput(96, 96);
+    input.settings.positiveViewSpaceZ = positiveViewSpaceZ;
+    if (!positiveViewSpaceZ) {
+      input.view.m[10] = -input.view.m[10];
+      input.proj.m[10] = -input.proj.m[10];
+      input.proj.m[14] = -input.proj.m[14];
+    }
+
+    RenderPreparationResult preparation{};
+    RenderResult renderResult{};
+    const RenderFrameContext frameContext = harness.FrameContext();
+    REQUIRE(harness.renderer().PrepareSceneForRender(sceneHandle, input, frameContext, &preparation).ok);
+    OffscreenFrame frame{};
+    REQUIRE(harness.CreateOffscreenFrame(96, 96, frame).ok);
+    REQUIRE(harness.ResetCommandList().ok);
+    REQUIRE(harness.renderer().Render(harness.commandList(), frame.binding, sceneHandle, input, frameContext, renderResult).ok);
+    harness.QueueColorReadback(frame);
+    REQUIRE(harness.ExecuteAndWait(renderResult.submission.uploadSyncPoint).ok);
+    return harness.ReadbackColor(frame);
+  };
+
+  const std::vector<uint8_t> positiveZ = render(true);
+  const std::vector<uint8_t> negativeZ = render(false);
+  REQUIRE_FALSE(positiveZ.empty());
+  REQUIRE_FALSE(negativeZ.empty());
+  CHECK(negativeZ == positiveZ);
+
+  REQUIRE(harness.renderer().DestroyUploadedScene(sceneHandle).ok);
 }
 
 TEST_CASE("Renderer reports dirty render errors as requiring submission") {

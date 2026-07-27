@@ -222,14 +222,15 @@ Mat3 ProjectCovarianceToScreen(const Mat3& covariance,
                                const Vec3& positionView,
                                float focalX,
                                float focalY) {
-  const float z = std::max(std::abs(positionView.z), 1e-4f);
-  const float invZ = 1.0f / z;
+  const float viewZSign = positionView.z < 0.0f ? -1.0f : 1.0f;
+  const float viewDepth = std::max(std::abs(positionView.z), 1e-4f);
+  const float invZ = 1.0f / viewDepth;
   const float invZ2 = invZ * invZ;
 
   const float j00 = focalX * invZ;
-  const float j02 = -focalX * positionView.x * invZ2;
+  const float j02 = -viewZSign * focalX * positionView.x * invZ2;
   const float j11 = focalY * invZ;
-  const float j12 = -focalY * positionView.y * invZ2;
+  const float j12 = -viewZSign * focalY * positionView.y * invZ2;
 
   const float c00 = covariance.m[0];
   const float c01 = 0.5f * (covariance.m[1] + covariance.m[3]);

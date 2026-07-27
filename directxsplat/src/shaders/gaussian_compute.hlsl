@@ -370,10 +370,11 @@ void CSPrepare(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadI
           float z = max(abs(viewDepth), 1e-4);
           float invZ = 1.0 / z;
           float invZ2 = invZ * invZ;
+          float viewZSign = gPositiveViewSpaceZ != 0u ? 1.0 : -1.0;
           float j00 = gFocalX * invZ;
-          float j02 = -gFocalX * posView.x * invZ2;
+          float j02 = -viewZSign * gFocalX * posView.x * invZ2;
           float j11 = gFocalY * invZ;
-          float j12 = -gFocalY * posView.y * invZ2;
+          float j12 = -viewZSign * gFocalY * posView.y * invZ2;
 
           float c00 = cov[0][0];
           float c01 = 0.5 * (cov[0][1] + cov[1][0]);
