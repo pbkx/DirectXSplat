@@ -212,6 +212,8 @@ class GaussianRasterPipeline {
     Microsoft::WRL::ComPtr<ID3D12Fence> inFlightFence;
     uint64_t inFlightFenceValue = 0;
     RenderScratch* inFlightNext = nullptr;
+    uint64_t lastUseCount = 0;
+    uint64_t underutilizedSinceUse = 0;
   };
 
   struct UploadedSceneRuntime {
@@ -243,6 +245,7 @@ class GaussianRasterPipeline {
     RenderScratch* inFlightScratchHead = nullptr;
     std::vector<std::shared_ptr<RenderScratch>> retainedScratch;
     std::weak_ptr<RenderScratch> publishedScratch;
+    uint64_t scratchUseCount = 0;
   };
 
   struct RetiredResource {
@@ -302,6 +305,7 @@ class GaussianRasterPipeline {
   uint64_t CurrentCompletedDirectFenceValue() const;
   uint64_t CurrentSubmittedDirectFenceValue() const;
   void CollectRuntimeScratch(UploadedSceneRuntime& runtime);
+  void TrimAvailableRuntimeScratch(UploadedSceneRuntime& runtime, uint64_t currentUseCount);
   Status EnsureUploadBuffer(size_t requiredBytes,
                             Microsoft::WRL::ComPtr<ID3D12Resource>& resource,
                             size_t& capacityBytes,

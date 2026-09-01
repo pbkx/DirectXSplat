@@ -43,6 +43,7 @@ constexpr uint32_t kProjectionActiveThreadHistogramBytes = kProjectionActiveThre
 constexpr uint32_t kStatsHistogramBytes = kSplatAlphaHistogramBytes + kProjectionActiveThreadHistogramBytes;
 constexpr uint32_t kVisibleCounterBytes = kProjectionActiveThreadHistogramOffset + kProjectionActiveThreadHistogramBytes;
 constexpr size_t kRenderScratchRetiredResourceSlots = 16;
+constexpr uint64_t kScratchRetentionUses = 120;
 constexpr DWORD kFenceWaitPollMs = 50;
 
 constexpr size_t AlignUp(size_t value, size_t alignment) {
@@ -695,6 +696,37 @@ void GaussianRasterPipeline::CollectRuntimeScratch(UploadedSceneRuntime& runtime
   }
 }
 
+void GaussianRasterPipeline::TrimAvailableRuntimeScratch(UploadedSceneRuntime& runtime,
+                                                         uint64_t currentUseCount) {
+  if (currentUseCount <= kScratchRetentionUses) {
+    return;
+  }
+
+  std::vector<std::shared_ptr<RenderScratch>> retired;
+  {
+    std::lock_guard<std::mutex> runtimeLock(*runtime.mutex);
+    const std::shared_ptr<RenderScratch> publishedScratch = runtime.publishedScratch.lock();
+    for (auto it = runtime.availableScratch.begin(); it != runtime.availableScratch.end();) {
+      const std::shared_ptr<RenderScratch>& scratch = *it;
+      const bool expired = scratch != nullptr && scratch != publishedScratch &&
+                           scratch->lastUseCount < currentUseCount &&
+                           currentUseCount - scratch->lastUseCount > kScratchRetentionUses;
+      if (expired) {
+        retired.push_back(std::move(*it));
+        it = runtime.availableScratch.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  for (const std::shared_ptr<RenderScratch>& scratch : retired) {
+    if (scratch != nullptr) {
+      (void)ReleaseRenderScratchResources(*scratch);
+    }
+  }
+}
+
 Status GaussianRasterPipeline::CreateDefaultBuffer(size_t bytes,
                                                    D3D12_RESOURCE_FLAGS flags,
                                                    D3D12_RESOURCE_STATES initialState,
@@ -1111,6 +1143,8 @@ Status GaussianRasterPipeline::ReleaseRenderScratchResources(RenderScratch& scra
   scratch.inFlightFence.Reset();
   scratch.inFlightFenceValue = 0;
   scratch.inFlightNext = nullptr;
+  scratch.lastUseCount = 0;
+  scratch.underutilizedSinceUse = 0;
   return Status::Ok();
 }
 
@@ -2324,6 +2358,15 @@ Status GaussianRasterPipeline::AcquireRenderScratch(UploadedSceneRuntime& runtim
   outScratch.reset();
   UpdateDirectQueueFenceProgress(frameContext);
   CollectRuntimeScratch(runtime);
+  uint64_t currentUseCount = 0;
+  {
+    std::lock_guard<std::mutex> runtimeLock(*runtime.mutex);
+    if (runtime.scratchUseCount != std::numeric_limits<uint64_t>::max()) {
+      runtime.scratchUseCount++;
+    }
+    currentUseCount = runtime.scratchUseCount;
+  }
+  TrimAvailableRuntimeScratch(runtime, currentUseCount);
   std::shared_ptr<RenderScratch> scratch;
   {
     std::lock_guard<std::mutex> runtimeLock(*runtime.mutex);
@@ -2335,6 +2378,19 @@ Status GaussianRasterPipeline::AcquireRenderScratch(UploadedSceneRuntime& runtim
   if (scratch == nullptr) {
     scratch = std::make_shared<RenderScratch>();
   }
+  const bool substantiallyUnderutilized =
+      requiredPairCapacity <= scratch->sortPairCapacity / 2u && scratch->sortPairCapacity > 1u;
+  if (!substantiallyUnderutilized) {
+    scratch->underutilizedSinceUse = 0;
+  } else if (scratch->underutilizedSinceUse == 0 ||
+             currentUseCount < scratch->underutilizedSinceUse) {
+    scratch->underutilizedSinceUse = currentUseCount;
+  } else if (currentUseCount - scratch->underutilizedSinceUse > kScratchRetentionUses) {
+    Status released = ReleaseRenderScratchResources(*scratch);
+    if (!released.ok) {
+      return released;
+    }
+  }
   Status ready = EnsureRenderScratchBuffers(runtime, requiredPairCapacity, *scratch);
   if (!ready.ok) {
     Status released = ReleaseRenderScratchResources(*scratch);
@@ -2343,6 +2399,7 @@ Status GaussianRasterPipeline::AcquireRenderScratch(UploadedSceneRuntime& runtim
     }
     return ready;
   }
+  scratch->lastUseCount = currentUseCount;
   outScratch = std::move(scratch);
   return Status::Ok();
 }
