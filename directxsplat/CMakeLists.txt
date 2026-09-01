@@ -12,6 +12,46 @@ else()
   set(DIRECTXSPLAT_ARCH_DIR x86)
 endif()
 
+set(DIRECTXSPLAT_VIEWER_RUNTIME_NAMES
+  msvcp140.dll
+  vcruntime140.dll
+  vcruntime140_1.dll
+)
+set(DIRECTXSPLAT_VIEWER_RUNTIME_DLLS "")
+set(DIRECTXSPLAT_VIEWER_RUNTIME_FOUND_NAMES "")
+set(DIRECTXSPLAT_VIEWER_RUNTIME_COMPLETE FALSE)
+if(DIRECTXSPLAT_BUILD_VIEWER)
+  set(_directxsplat_runtime_skip_was_defined FALSE)
+  if(DEFINED CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP)
+    set(_directxsplat_runtime_skip_was_defined TRUE)
+    set(_directxsplat_runtime_skip "${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP}")
+  endif()
+  set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+  include(InstallRequiredSystemLibraries)
+  if(_directxsplat_runtime_skip_was_defined)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP "${_directxsplat_runtime_skip}")
+  else()
+    unset(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP)
+  endif()
+  unset(_directxsplat_runtime_skip)
+  unset(_directxsplat_runtime_skip_was_defined)
+
+  foreach(runtime_dll IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+    get_filename_component(runtime_name "${runtime_dll}" NAME)
+    string(TOLOWER "${runtime_name}" runtime_name)
+    if(runtime_name IN_LIST DIRECTXSPLAT_VIEWER_RUNTIME_NAMES)
+      list(APPEND DIRECTXSPLAT_VIEWER_RUNTIME_DLLS "${runtime_dll}")
+      list(APPEND DIRECTXSPLAT_VIEWER_RUNTIME_FOUND_NAMES "${runtime_name}")
+    endif()
+  endforeach()
+  set(DIRECTXSPLAT_VIEWER_RUNTIME_COMPLETE TRUE)
+  foreach(runtime_name IN LISTS DIRECTXSPLAT_VIEWER_RUNTIME_NAMES)
+    if(NOT runtime_name IN_LIST DIRECTXSPLAT_VIEWER_RUNTIME_FOUND_NAMES)
+      set(DIRECTXSPLAT_VIEWER_RUNTIME_COMPLETE FALSE)
+    endif()
+  endforeach()
+endif()
+
 set(DIRECTXSPLAT_DXCOMPILER_DLL "")
 set(DIRECTXSPLAT_DXIL_DLL "")
 file(GLOB DIRECTXSPLAT_DXCOMPILER_CANDIDATES
@@ -185,6 +225,13 @@ if(DIRECTXSPLAT_BUILD_VIEWER)
       directxsplat_stage_dxc_runtime(directxsplat_viewer)
     endif()
 
+    if(DIRECTXSPLAT_VIEWER_RUNTIME_COMPLETE)
+      install(FILES
+        ${DIRECTXSPLAT_VIEWER_RUNTIME_DLLS}
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+      )
+    endif()
+
     install(TARGETS directxsplat_viewer
       RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
@@ -198,7 +245,7 @@ if(DIRECTXSPLAT_BUILD_VIEWER)
       RENAME README.txt
     )
 
-    if(DIRECTXSPLAT_DXCOMPILER_DLL AND DIRECTXSPLAT_DXIL_DLL)
+    if(DIRECTXSPLAT_DXCOMPILER_DLL AND DIRECTXSPLAT_DXIL_DLL AND DIRECTXSPLAT_VIEWER_RUNTIME_COMPLETE)
       set(DIRECTXSPLAT_VIEWER_PACKAGE_NAME "DirectXSplatViewer-${PROJECT_VERSION}-win64")
       set(DIRECTXSPLAT_VIEWER_PACKAGE_DIR "${CMAKE_BINARY_DIR}/${DIRECTXSPLAT_VIEWER_PACKAGE_NAME}")
       set(DIRECTXSPLAT_VIEWER_PACKAGE_ZIP "${CMAKE_BINARY_DIR}/${DIRECTXSPLAT_VIEWER_PACKAGE_NAME}.zip")
@@ -210,21 +257,23 @@ if(DIRECTXSPLAT_BUILD_VIEWER)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:directxsplat_viewer>" "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}/DirectXSplatViewer.exe"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DIRECTXSPLAT_DXCOMPILER_DLL}" "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}/dxcompiler.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DIRECTXSPLAT_DXIL_DLL}" "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}/dxil.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DIRECTXSPLAT_VIEWER_RUNTIME_DLLS} "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DIRECTXSPLAT_ROOT_DIR}/LICENSE" "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}/LICENSE"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DIRECTXSPLAT_ROOT_DIR}/README.md" "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}/README.txt"
         COMMAND ${CMAKE_COMMAND} -E rm -f "${DIRECTXSPLAT_VIEWER_PACKAGE_ZIP}"
-        COMMAND ${CMAKE_COMMAND} -E chdir "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}" ${CMAKE_COMMAND} -E tar cf "${DIRECTXSPLAT_VIEWER_PACKAGE_ZIP}" --format=zip -- DirectXSplatViewer.exe dxcompiler.dll dxil.dll LICENSE README.txt
+        COMMAND ${CMAKE_COMMAND} -E chdir "${DIRECTXSPLAT_VIEWER_PACKAGE_DIR}" ${CMAKE_COMMAND} -E tar cf "${DIRECTXSPLAT_VIEWER_PACKAGE_ZIP}" --format=zip -- DirectXSplatViewer.exe dxcompiler.dll dxil.dll ${DIRECTXSPLAT_VIEWER_RUNTIME_NAMES} LICENSE README.txt
         DEPENDS
           directxsplat_viewer
           "${DIRECTXSPLAT_DXCOMPILER_DLL}"
           "${DIRECTXSPLAT_DXIL_DLL}"
+          ${DIRECTXSPLAT_VIEWER_RUNTIME_DLLS}
           "${DIRECTXSPLAT_ROOT_DIR}/LICENSE"
           "${DIRECTXSPLAT_ROOT_DIR}/README.md"
         VERBATIM
       )
       add_custom_target(directxsplat_viewer_package DEPENDS "${DIRECTXSPLAT_VIEWER_PACKAGE_ZIP}")
     else()
-      message(WARNING "directxsplat_viewer_package skipped: dxcompiler.dll or dxil.dll was not found")
+      message(WARNING "directxsplat_viewer_package skipped: a required runtime DLL was not found")
     endif()
   endif()
 endif()
