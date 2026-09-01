@@ -44,6 +44,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 "  --scene-folder <folder>\n"
                 "  --render-size <width>x<height>\n"
                 "  --images-path <directory>\n"
+                "  --debug-layer\n"
                 "  --help, -h",
                 "DirectXSplat", MB_OK);
     return 0;
@@ -55,6 +56,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   config.sourceImageDirectory = parse.value.imagePathOverride.value_or("");
   config.width = parse.value.renderWidthOverride.value_or(1600);
   config.height = parse.value.renderHeightOverride.value_or(900);
+  config.enableDebugLayer = parse.value.enableDebugLayer;
 
   const directxsplat::Status result = directxsplat::Show(config);
   if (!result.ok) {

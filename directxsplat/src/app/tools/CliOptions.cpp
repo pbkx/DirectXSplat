@@ -27,6 +27,10 @@ StatusOr<CliOptions> ParseCliOptions(const std::vector<std::string>& args) {
       out.showHelp = true;
       continue;
     }
+    if (arg == "--debug-layer") {
+      out.enableDebugLayer = true;
+      continue;
+    }
     if (arg == "--images-path" && i + 1 < args.size()) {
       out.imagePathOverride = args[++i];
       continue;

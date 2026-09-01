@@ -29,16 +29,18 @@ TEST_CASE("CLI parser covers option and positional matrix") {
   auto parsed = internal::ParseCliOptions({"--help"});
   REQUIRE(parsed.ok());
   CHECK(parsed.value.showHelp);
+  CHECK_FALSE(parsed.value.enableDebugLayer);
   CHECK_FALSE(parsed.value.scenePath.has_value());
 
   parsed = internal::ParseCliOptions({"--images-path", "images", "--scene-folder", "scenes", "--render-size", "320x240",
-                                      "botanical", "garden.ply"});
+                                      "--debug-layer", "botanical", "garden.ply"});
   REQUIRE(parsed.ok());
   REQUIRE(parsed.value.imagePathOverride.has_value());
   REQUIRE(parsed.value.folderTraversalPath.has_value());
   REQUIRE(parsed.value.renderWidthOverride.has_value());
   REQUIRE(parsed.value.renderHeightOverride.has_value());
   REQUIRE(parsed.value.scenePath.has_value());
+  CHECK(parsed.value.enableDebugLayer);
   CHECK(*parsed.value.imagePathOverride == "images");
   CHECK(*parsed.value.folderTraversalPath == "scenes");
   CHECK(*parsed.value.renderWidthOverride == 320u);

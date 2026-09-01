@@ -62,7 +62,7 @@ Status Application::Initialize(const ViewerConfig& config) {
     return Status::Error("failed to create window (win32=" + std::to_string(window_.LastCreateError()) + ")");
   }
 
-  Status status = d3d_.Initialize(window_.Hwnd(), window_.Width(), window_.Height(), true);
+  Status status = d3d_.Initialize(window_.Hwnd(), window_.Width(), window_.Height(), config_.enableDebugLayer);
   if (!status.ok) {
     return status;
   }
