@@ -208,8 +208,7 @@ Status Application::Run() {
     Status resizeStatus = ApplyPendingResize();
     if (!resizeStatus.ok) {
       statusMessage_ = resizeStatus.message;
-      Sleep(16);
-      continue;
+      return resizeStatus;
     }
 
     frameStats_ = {};
@@ -217,7 +216,7 @@ Status Application::Run() {
     Status beginStatus = d3d_.BeginFrame(true);
     if (!beginStatus.ok) {
       statusMessage_ = beginStatus.message;
-      continue;
+      return beginStatus;
     }
 
     ImGui_ImplDX12_NewFrame();
@@ -303,8 +302,7 @@ Status Application::Run() {
             statusMessage_ = "direct queue upload sync failed";
             renderer_.NotifyDeviceLost();
             d3d_.NotifyQueueLost();
-            MessageBoxA(window_.Hwnd(), statusMessage_.c_str(), "DirectXSplat", MB_OK | MB_ICONERROR);
-            break;
+            return Status::Error(statusMessage_);
           }
         }
       }
@@ -405,8 +403,7 @@ Status Application::Run() {
     if (!endStatus.ok) {
       statusMessage_ = endStatus.message;
       renderer_.NotifyDeviceLost();
-      MessageBoxA(window_.Hwnd(), statusMessage_.c_str(), "DirectXSplat", MB_OK | MB_ICONERROR);
-      break;
+      return endStatus;
     }
 
     if (fullscreenTogglePending_) {
