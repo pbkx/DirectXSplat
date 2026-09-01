@@ -26,6 +26,17 @@ constexpr uint32_t kRadix = 256u;
 constexpr uint32_t kRadixPasses = 4u;
 constexpr uint32_t kGlobalHistPartitionSize = 32768u;
 constexpr uint32_t kMaxDispatchDimension = 65535u;
+constexpr uint32_t kShaderModel60Value = 0x60u;
+constexpr std::array<D3D_SHADER_MODEL, 8> kRequestedShaderModels = {
+    static_cast<D3D_SHADER_MODEL>(0x67),
+    static_cast<D3D_SHADER_MODEL>(0x66),
+    static_cast<D3D_SHADER_MODEL>(0x65),
+    static_cast<D3D_SHADER_MODEL>(0x64),
+    static_cast<D3D_SHADER_MODEL>(0x63),
+    static_cast<D3D_SHADER_MODEL>(0x62),
+    static_cast<D3D_SHADER_MODEL>(0x61),
+    static_cast<D3D_SHADER_MODEL>(kShaderModel60Value),
+};
 
 struct EmbeddedDxcSource {
   const char* name = nullptr;
@@ -204,15 +215,24 @@ Status OneSweep::QueryDeviceInfo() {
   const bool isWarpDevice = ((adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0) ||
                             (_wcsicmp(adapterDesc.Description, L"Microsoft Basic Render Driver") == 0);
 
-  D3D12_FEATURE_DATA_SHADER_MODEL model{D3D_SHADER_MODEL_6_7};
-  hr = device_->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &model, sizeof(model));
-  if (FAILED(hr) || model.HighestShaderModel < D3D_SHADER_MODEL_6_0) {
+  D3D12_FEATURE_DATA_SHADER_MODEL model{};
+  // Numeric values compile with SDKs that predate SM 6.7. Older runtimes require
+  // retrying lower models when they reject an unknown maximum with E_INVALIDARG.
+  for (const D3D_SHADER_MODEL requestedModel : kRequestedShaderModels) {
+    model.HighestShaderModel = requestedModel;
+    hr = device_->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &model, sizeof(model));
+    if (hr != E_INVALIDARG) {
+      break;
+    }
+  }
+  if (FAILED(hr) || static_cast<uint32_t>(model.HighestShaderModel) < kShaderModel60Value) {
     return Status::Error("OneSweep requires shader model 6.0 or newer");
   }
 
   static constexpr const wchar_t* kShaderModelNames[] = {L"cs_6_0", L"cs_6_1", L"cs_6_2", L"cs_6_3",
-                                                          L"cs_6_4", L"cs_6_5", L"cs_6_6", L"cs_6_7"};
-  const uint32_t shaderModelIndex = model.HighestShaderModel & 0xF;
+                                                           L"cs_6_4", L"cs_6_5", L"cs_6_6", L"cs_6_7"};
+  const uint32_t shaderModelIndex =
+      static_cast<uint32_t>(model.HighestShaderModel) - kShaderModel60Value;
   if (shaderModelIndex >= _countof(kShaderModelNames)) {
     return Status::Error("unsupported shader model for OneSweep");
   }
