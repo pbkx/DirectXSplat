@@ -86,7 +86,7 @@ cmake --build build-lib --config Release --target directxsplat
 
 ## Use From CMake
 
-Fetch the `v0.1.0` release:
+Fetch the `v0.1.1` release:
 
 ```cmake
 include(FetchContent)
@@ -94,7 +94,7 @@ include(FetchContent)
 FetchContent_Declare(
   DirectXSplat
   GIT_REPOSITORY https://github.com/pbkx/DirectXSplat.git
-  GIT_TAG v0.1.0
+  GIT_TAG v0.1.1
 )
 FetchContent_MakeAvailable(DirectXSplat)
 

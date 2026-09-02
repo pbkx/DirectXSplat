@@ -47,7 +47,7 @@ jobs:
 
       - name: Verify viewer ZIP
         run: |
-          $zip = "build/viewer-package/DirectXSplatViewer-0.1.0-win64.zip"
+          $zip = "build/viewer-package/DirectXSplatViewer-0.1.1-win64.zip"
           if (-not (Test-Path $zip -PathType Leaf)) {
             throw "Viewer ZIP was not created: $zip"
           }
@@ -81,8 +81,8 @@ jobs:
       - name: Upload viewer ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DirectXSplatViewer-0.1.0-win64
-          path: build/viewer-package/DirectXSplatViewer-0.1.0-win64.zip
+          name: DirectXSplatViewer-0.1.1-win64
+          path: build/viewer-package/DirectXSplatViewer-0.1.1-win64.zip
           if-no-files-found: error
 
       - name: Publish GitHub release asset
@@ -91,13 +91,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $zip = "build/viewer-package/DirectXSplatViewer-0.1.0-win64.zip"
+          $zip = "build/viewer-package/DirectXSplatViewer-0.1.1-win64.zip"
+          $exe = "build/viewer-package/bin/Release/DirectXSplatViewer.exe"
           $ErrorActionPreference = "Continue"
           gh release view $tag *> $null
           $viewExit = $LASTEXITCODE
           $ErrorActionPreference = "Stop"
           if ($viewExit -eq 0) {
-            gh release upload $tag $zip --clobber
+            gh release upload $tag $zip $exe --clobber
           } else {
-            gh release create $tag $zip --title "DirectXSplat $tag" --notes "DirectXSplat viewer package."
+            gh release create $tag $zip $exe --title $tag --generate-notes
           }
