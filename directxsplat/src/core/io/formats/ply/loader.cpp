@@ -116,24 +116,48 @@ float ColorToShDc(float c) {
   return (c - 0.5f) / 0.28209479177387814f;
 }
 
-float NormalizeColorValue(double v) {
-  if (v > 1.0) {
-    return Saturate(static_cast<float>(v / 255.0));
+float NormalizeColorValue(double value, ply::PlyScalarType type) {
+  double maximum = 1.0;
+  switch (type) {
+    case ply::PlyScalarType::Int8:
+      maximum = static_cast<double>(std::numeric_limits<int8_t>::max());
+      break;
+    case ply::PlyScalarType::UInt8:
+      maximum = static_cast<double>(std::numeric_limits<uint8_t>::max());
+      break;
+    case ply::PlyScalarType::Int16:
+      maximum = static_cast<double>(std::numeric_limits<int16_t>::max());
+      break;
+    case ply::PlyScalarType::UInt16:
+      maximum = static_cast<double>(std::numeric_limits<uint16_t>::max());
+      break;
+    case ply::PlyScalarType::Int32:
+      maximum = static_cast<double>(std::numeric_limits<int32_t>::max());
+      break;
+    case ply::PlyScalarType::UInt32:
+      maximum = static_cast<double>(std::numeric_limits<uint32_t>::max());
+      break;
+    case ply::PlyScalarType::Float32:
+    case ply::PlyScalarType::Float64:
+    case ply::PlyScalarType::Unknown:
+      break;
   }
-  return Saturate(static_cast<float>(v));
+  return Saturate(static_cast<float>(value / maximum));
 }
 
 float ReadColor(const ply::PlyElement& element, const std::unordered_map<std::string, int>& indices, uint32_t row,
                 const std::string& a, const std::string& b, double fallback) {
   const auto ia = indices.find(a);
   if (ia != indices.end()) {
-    return NormalizeColorValue(element.scalarColumns[ia->second][row]);
+    const size_t index = static_cast<size_t>(ia->second);
+    return NormalizeColorValue(element.scalarColumns[index][row], element.properties[index].type);
   }
   const auto ib = indices.find(b);
   if (ib != indices.end()) {
-    return NormalizeColorValue(element.scalarColumns[ib->second][row]);
+    const size_t index = static_cast<size_t>(ib->second);
+    return NormalizeColorValue(element.scalarColumns[index][row], element.properties[index].type);
   }
-  return NormalizeColorValue(fallback);
+  return Saturate(static_cast<float>(fallback));
 }
 
 float UnpackUnorm(uint32_t value, uint32_t bits) {
@@ -334,9 +358,9 @@ GaussianSet ParseStandardGaussianSet(const ply::PlyFile& file, const std::string
       g.sh[16] = static_cast<float>(ReadProp(*vertex, propIndices, i, "f_dc_1", 0.0));
       g.sh[32] = static_cast<float>(ReadProp(*vertex, propIndices, i, "f_dc_2", 0.0));
     } else if (hasRgb) {
-      g.sh[0] = ColorToShDc(ReadColor(*vertex, propIndices, i, "red", "r", 127.5));
-      g.sh[16] = ColorToShDc(ReadColor(*vertex, propIndices, i, "green", "g", 127.5));
-      g.sh[32] = ColorToShDc(ReadColor(*vertex, propIndices, i, "blue", "b", 127.5));
+      g.sh[0] = ColorToShDc(ReadColor(*vertex, propIndices, i, "red", "r", 0.5));
+      g.sh[16] = ColorToShDc(ReadColor(*vertex, propIndices, i, "green", "g", 0.5));
+      g.sh[32] = ColorToShDc(ReadColor(*vertex, propIndices, i, "blue", "b", 0.5));
     }
 
     for (uint32_t r = 0; r < restCount; ++r) {
@@ -1005,9 +1029,9 @@ StatusOr<PlyLoadResult> LoadBinaryStandardPlyFast(std::ifstream& file, const Fas
       double rot2 = 0.0;
       double rot3 = 0.0;
       double opacity = pointCloudFallback ? 2.0 : 1.0;
-      double red = 127.5;
-      double green = 127.5;
-      double blue = 127.5;
+      double red = 0.5;
+      double green = 0.5;
+      double blue = 0.5;
       bool readRed = false;
       bool readGreen = false;
       bool readBlue = false;
@@ -1043,9 +1067,16 @@ StatusOr<PlyLoadResult> LoadBinaryStandardPlyFast(std::ifstream& file, const Fas
         else if (name == "f_dc_0") g.sh[0] = static_cast<float>(v);
         else if (name == "f_dc_1") g.sh[16] = static_cast<float>(v);
         else if (name == "f_dc_2") g.sh[32] = static_cast<float>(v);
-        else if (name == "red" || name == "r") { red = v; readRed = true; }
-        else if (name == "green" || name == "g") { green = v; readGreen = true; }
-        else if (name == "blue" || name == "b") { blue = v; readBlue = true; }
+        else if (name == "red" || name == "r") {
+          red = NormalizeColorValue(v, prop.type);
+          readRed = true;
+        } else if (name == "green" || name == "g") {
+          green = NormalizeColorValue(v, prop.type);
+          readGreen = true;
+        } else if (name == "blue" || name == "b") {
+          blue = NormalizeColorValue(v, prop.type);
+          readBlue = true;
+        }
         if (pi < restByProperty.size() && restByProperty[pi] >= 0) {
           WriteRestSh(g.sh, static_cast<uint32_t>(restByProperty[pi]), restCount, static_cast<float>(v), blockLayout);
         }
@@ -1064,12 +1095,12 @@ StatusOr<PlyLoadResult> LoadBinaryStandardPlyFast(std::ifstream& file, const Fas
       g.rotation = Normalize({static_cast<float>(rot1), static_cast<float>(rot2), static_cast<float>(rot3), static_cast<float>(rot0)});
       g.opacity = static_cast<float>(opacity);
       if (!hasDc && hasRgb) {
-        if (!readRed) red = 127.5;
-        if (!readGreen) green = 127.5;
-        if (!readBlue) blue = 127.5;
-        g.sh[0] = ColorToShDc(NormalizeColorValue(red));
-        g.sh[16] = ColorToShDc(NormalizeColorValue(green));
-        g.sh[32] = ColorToShDc(NormalizeColorValue(blue));
+        if (!readRed) red = 0.5;
+        if (!readGreen) green = 0.5;
+        if (!readBlue) blue = 0.5;
+        g.sh[0] = ColorToShDc(static_cast<float>(red));
+        g.sh[16] = ColorToShDc(static_cast<float>(green));
+        g.sh[32] = ColorToShDc(static_cast<float>(blue));
       }
 
       if (!std::isfinite(g.position.x) || !std::isfinite(g.position.y) || !std::isfinite(g.position.z) ||

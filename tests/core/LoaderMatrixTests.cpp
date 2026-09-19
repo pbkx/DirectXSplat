@@ -346,6 +346,64 @@ TEST_CASE("PLY loader accepts standard ascii point cloud and binary gaussian sch
   std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("PLY loader normalizes integer colors by declared type") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_ply_color_types");
+
+  const std::filesystem::path ascii = dir / "uint8_ascii.ply";
+  WriteText(ascii,
+            "ply\n"
+            "format ascii 1.0\n"
+            "element vertex 1\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "property uchar red\n"
+            "property uchar green\n"
+            "property uchar blue\n"
+            "end_header\n"
+            "0 0 0 1 0 255\n");
+  auto loaded = LoadSceneFromFile(ascii.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  const Gaussian& uint8Gaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(uint8Gaussian.sh[0] == doctest::Approx((1.0f / 255.0f - 0.5f) / kShC0));
+  CHECK(uint8Gaussian.sh[16] == doctest::Approx(-0.5f / kShC0));
+  CHECK(uint8Gaussian.sh[32] == doctest::Approx(0.5f / kShC0));
+
+  const std::filesystem::path binary = dir / "uint16_binary.ply";
+  std::string bytes =
+      "ply\n"
+      "format binary_little_endian 1.0\n"
+      "element vertex 1\n"
+      "property float x\n"
+      "property float y\n"
+      "property float z\n"
+      "property ushort red\n"
+      "property ushort green\n"
+      "property ushort blue\n"
+      "end_header\n";
+  AppendFloat(bytes, 0.0f);
+  AppendFloat(bytes, 0.0f);
+  AppendFloat(bytes, 0.0f);
+  AppendPod(bytes, uint16_t{1u});
+  AppendPod(bytes, uint16_t{32768u});
+  AppendPod(bytes, uint16_t{65535u});
+  WriteText(binary, bytes);
+
+  loaded = LoadSceneFromFile(binary.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  const Gaussian& uint16Gaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(uint16Gaussian.sh[0] == doctest::Approx((1.0f / 65535.0f - 0.5f) / kShC0));
+  CHECK(uint16Gaussian.sh[16] == doctest::Approx((32768.0f / 65535.0f - 0.5f) / kShC0));
+  CHECK(uint16Gaussian.sh[32] == doctest::Approx(0.5f / kShC0));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("SPLAT loader accepts valid records and rejects invalid record boundaries") {
   const std::filesystem::path dir = MakeTempDir("directxsplat_splat_matrix");
   const std::filesystem::path valid = dir / "valid.splat";
