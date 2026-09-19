@@ -198,7 +198,12 @@ StatusOr<CameraParams> ParseDirectXSplatCamera(const Json& item) {
   input.fovYRadians = item.value("fovY", input.fovYRadians);
   const uint32_t width = item.value("width", kDefaultCameraWidth);
   const uint32_t height = item.value("height", kDefaultCameraHeight);
-  return StatusOr<CameraParams>::Ok(CameraParamsFromInputCamera(input, width, height));
+  CameraParams camera = CameraParamsFromInputCamera(input, width, height);
+  const Status validation = ValidateCameraParamsForRendering(camera);
+  if (!validation.ok) {
+    return StatusOr<CameraParams>::Error(validation.message);
+  }
+  return StatusOr<CameraParams>::Ok(std::move(camera));
 }
 
 }  // namespace

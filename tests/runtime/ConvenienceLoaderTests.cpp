@@ -287,6 +287,32 @@ TEST_CASE("LoadCameraSet reads DirectXSplat camera json") {
   std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("LoadCameraSet rejects invalid DirectXSplat camera render parameters") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_convenience_invalid_direct_camera_json");
+  const std::filesystem::path path = dir / "cameras.json";
+
+  struct Case {
+    const char* json;
+    const char* expectedError;
+  };
+  const std::array<Case, 4> cases{{
+      {"[{\"width\":0,\"height\":900}]", "camera width must be greater than zero"},
+      {"[{\"width\":1600,\"height\":0}]", "camera height must be greater than zero"},
+      {"[{\"width\":1048577,\"height\":900}]", "invalid camera dimensions"},
+      {"[{\"position\":[1e39,0,0]}]", "invalid camera matrix"},
+  }};
+
+  for (const Case& testCase : cases) {
+    WriteFile(path, testCase.json);
+    const auto loaded = directxsplat::LoadCameraSet(path);
+    CHECK_FALSE(loaded.ok());
+    CHECK(loaded.status.message == testCase.expectedError);
+  }
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("MakeOrbitCameraSet returns empty for empty splats") {
   const directxsplat::GaussianSplats splats;
   const directxsplat::CameraSet cameras = directxsplat::MakeOrbitCameraSet(splats, 4, 1600, 900);
