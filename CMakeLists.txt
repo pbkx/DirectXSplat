@@ -87,6 +87,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+FetchContent_Declare(
+  directxsplat_zstd
+  URL https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.zip
+  SOURCE_SUBDIR build/single_file_libs
+)
+FetchContent_MakeAvailable(directxsplat_zstd)
+set_property(GLOBAL PROPERTY DIRECTXSPLAT_ZSTD_SOURCE_DIR "${directxsplat_zstd_SOURCE_DIR}")
+
 if(WIN32 AND MSVC)
   FetchContent_Declare(
     imgui

@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "miniz.h"
+#include "zstd.h"
 
 #include "directxsplat/bounding.h"
 
@@ -20,10 +21,13 @@ namespace {
 
 constexpr uint32_t kSpzMagic = 0x5053474e;
 constexpr uint32_t kMaxSpzVersion = 4;
+constexpr uint32_t kMinZstdSpzVersion = 4;
 constexpr uint32_t kMaxSpzPoints = 10000000;
 constexpr size_t kMaxSpzCompressedBytes = 512ull * 1024ull * 1024ull;
 constexpr size_t kMaxSpzDecompressedBytes = 1024ull * 1024ull * 1024ull;
 constexpr uint64_t kMaxSpzExpandedBytes = 2ull * 1024ull * 1024ull * 1024ull;
+constexpr size_t kNgspHeaderBytes = 32;
+constexpr size_t kNgspTocEntryBytes = 16;
 constexpr float kSpzColorScale = 0.15f;
 constexpr float kSqrtHalf = 0.7071067811865476f;
 
@@ -62,6 +66,10 @@ uint16_t ReadLe16(const uint8_t* p) {
 uint32_t ReadLe32(const uint8_t* p) {
   return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
          (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+}
+
+uint64_t ReadLe64(const uint8_t* p) {
+  return static_cast<uint64_t>(ReadLe32(p)) | (static_cast<uint64_t>(ReadLe32(p + 4)) << 32);
 }
 
 bool SkipZeroTerminated(const std::vector<uint8_t>& data, size_t& offset) {
@@ -239,6 +247,105 @@ Status ValidateSpzGaussianStorage(uint32_t count) {
   return Status::Ok();
 }
 
+StatusOr<std::vector<uint8_t>> DecompressNgsp(const std::vector<uint8_t>& data) {
+  if (data.size() < kNgspHeaderBytes) {
+    return StatusOr<std::vector<uint8_t>>::Error("truncated spz v4 header");
+  }
+
+  const uint32_t magic = ReadLe32(data.data());
+  const uint32_t version = ReadLe32(data.data() + 4);
+  const uint32_t count = ReadLe32(data.data() + 8);
+  const uint32_t shDegree = data[12];
+  const uint8_t numStreams = data[15];
+  const uint32_t tocByteOffset = ReadLe32(data.data() + 16);
+  if (magic != kSpzMagic) {
+    return StatusOr<std::vector<uint8_t>>::Error("invalid spz magic");
+  }
+  if (version < kMinZstdSpzVersion || version > kMaxSpzVersion) {
+    return StatusOr<std::vector<uint8_t>>::Error("unsupported spz version");
+  }
+  if (count == 0) {
+    return StatusOr<std::vector<uint8_t>>::Error("spz scene has zero count");
+  }
+  if (count > kMaxSpzPoints) {
+    return StatusOr<std::vector<uint8_t>>::Error("spz scene has too many splats");
+  }
+  const Status storageStatus = ValidateSpzGaussianStorage(count);
+  if (!storageStatus.ok) {
+    return StatusOr<std::vector<uint8_t>>::Error(storageStatus.message);
+  }
+
+  const int32_t dim = ShDimForDegree(shDegree);
+  if (dim < 0) {
+    return StatusOr<std::vector<uint8_t>>::Error("unsupported spz sh degree");
+  }
+  const size_t n = count;
+  const std::array<size_t, 6> streamSizes = {
+      n * 9u,
+      n,
+      n * 3u,
+      n * 3u,
+      n * 4u,
+      n * static_cast<size_t>(dim) * 3u,
+  };
+  const size_t expectedStreams = streamSizes.back() == 0 ? 5u : 6u;
+  if (numStreams != expectedStreams) {
+    return StatusOr<std::vector<uint8_t>>::Error("invalid spz v4 stream count");
+  }
+  if (tocByteOffset < kNgspHeaderBytes || tocByteOffset > data.size()) {
+    return StatusOr<std::vector<uint8_t>>::Error("invalid spz v4 toc offset");
+  }
+  const size_t tocSize = expectedStreams * kNgspTocEntryBytes;
+  if (tocSize > data.size() - tocByteOffset) {
+    return StatusOr<std::vector<uint8_t>>::Error("truncated spz v4 toc");
+  }
+
+  size_t decompressedSize = 16;
+  for (size_t i = 0; i < expectedStreams; ++i) {
+    if (streamSizes[i] > kMaxSpzDecompressedBytes - decompressedSize) {
+      return StatusOr<std::vector<uint8_t>>::Error("spz payload is too large");
+    }
+    decompressedSize += streamSizes[i];
+  }
+
+  std::vector<uint8_t> out;
+  try {
+    out.resize(decompressedSize);
+  } catch (const std::bad_alloc&) {
+    return StatusOr<std::vector<uint8_t>>::Error("spz allocation failed");
+  } catch (const std::length_error&) {
+    return StatusOr<std::vector<uint8_t>>::Error("spz payload is too large");
+  }
+  std::copy_n(data.data(), 16, out.data());
+
+  size_t compressedOffset = static_cast<size_t>(tocByteOffset) + tocSize;
+  size_t decompressedOffset = 16;
+  for (size_t i = 0; i < expectedStreams; ++i) {
+    const size_t entryOffset = static_cast<size_t>(tocByteOffset) + i * kNgspTocEntryBytes;
+    const uint64_t compressedSize64 = ReadLe64(data.data() + entryOffset);
+    const uint64_t uncompressedSize64 = ReadLe64(data.data() + entryOffset + 8);
+    if (uncompressedSize64 != streamSizes[i]) {
+      return StatusOr<std::vector<uint8_t>>::Error("invalid spz v4 stream size");
+    }
+    if (compressedSize64 > static_cast<uint64_t>(data.size() - compressedOffset)) {
+      return StatusOr<std::vector<uint8_t>>::Error("truncated spz v4 stream");
+    }
+    const size_t compressedSize = static_cast<size_t>(compressedSize64);
+    const size_t result = ZSTD_decompress(out.data() + decompressedOffset, streamSizes[i],
+                                          data.data() + compressedOffset, compressedSize);
+    if (ZSTD_isError(result) || result != streamSizes[i]) {
+      return StatusOr<std::vector<uint8_t>>::Error("failed to decompress spz v4 stream");
+    }
+    compressedOffset += compressedSize;
+    decompressedOffset += streamSizes[i];
+  }
+  if (compressedOffset != data.size()) {
+    return StatusOr<std::vector<uint8_t>>::Error("invalid spz v4 payload size");
+  }
+
+  return StatusOr<std::vector<uint8_t>>::Ok(std::move(out));
+}
+
 Aabb ComputeGaussianBounds(const std::vector<Gaussian>& gaussians) {
   Aabb out{};
   if (gaussians.empty()) {
@@ -359,7 +466,15 @@ StatusOr<GaussianSet> SpzLoader::Load(const std::string& path, const std::string
     return StatusOr<GaussianSet>::Error(file.status.message);
   }
 
-  const auto payload = DecompressGzip(file.value);
+  const bool isNgsp = file.value.size() >= 4 && ReadLe32(file.value.data()) == kSpzMagic;
+  StatusOr<std::vector<uint8_t>> payload;
+  if (isNgsp) {
+    payload = DecompressNgsp(file.value);
+  } else if (file.value.size() >= 2 && file.value[0] == 0x1f && file.value[1] == 0x8b) {
+    payload = DecompressGzip(file.value);
+  } else {
+    return StatusOr<GaussianSet>::Error("unrecognized spz container");
+  }
   if (!payload.ok()) {
     return StatusOr<GaussianSet>::Error(payload.status.message);
   }
@@ -374,6 +489,9 @@ StatusOr<GaussianSet> SpzLoader::Load(const std::string& path, const std::string
   const uint32_t shDegree = data[12];
   if (magic != kSpzMagic) {
     return StatusOr<GaussianSet>::Error("invalid spz magic");
+  }
+  if (!isNgsp && version >= kMinZstdSpzVersion) {
+    return StatusOr<GaussianSet>::Error("unsupported spz version");
   }
 
   size_t offset = 0;

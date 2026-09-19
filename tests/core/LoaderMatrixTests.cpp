@@ -48,6 +48,55 @@ void AppendByte(std::string& out, uint8_t value) {
   out.push_back(static_cast<char>(value));
 }
 
+std::string RawZstdFrame(std::initializer_list<uint8_t> payload) {
+  std::string out;
+  AppendByte(out, 0x28u);
+  AppendByte(out, 0xB5u);
+  AppendByte(out, 0x2Fu);
+  AppendByte(out, 0xFDu);
+  AppendByte(out, 0x20u);
+  AppendByte(out, static_cast<uint8_t>(payload.size()));
+  const uint32_t blockHeader = (static_cast<uint32_t>(payload.size()) << 3u) | 1u;
+  AppendByte(out, static_cast<uint8_t>(blockHeader & 0xFFu));
+  AppendByte(out, static_cast<uint8_t>((blockHeader >> 8u) & 0xFFu));
+  AppendByte(out, static_cast<uint8_t>((blockHeader >> 16u) & 0xFFu));
+  for (uint8_t value : payload) {
+    AppendByte(out, value);
+  }
+  return out;
+}
+
+std::string MakeSpzV4Record() {
+  const std::array<std::string, 6> streams{{
+      RawZstdFrame({0x00u, 0x01u, 0x00u, 0x00u, 0xFEu, 0xFFu, 0x00u, 0xFDu, 0xFFu}),
+      RawZstdFrame({128u}),
+      RawZstdFrame({128u, 64u, 255u}),
+      RawZstdFrame({160u, 144u, 176u}),
+      RawZstdFrame({0x00u, 0x00u, 0x00u, 0xC0u}),
+      RawZstdFrame({128u, 128u, 128u, 255u, 0u, 128u, 64u, 192u, 128u}),
+  }};
+  const std::array<uint64_t, 6> uncompressedSizes{{9u, 1u, 3u, 3u, 4u, 9u}};
+
+  std::string out;
+  AppendPod(out, uint32_t{0x5053474Eu});
+  AppendPod(out, uint32_t{4u});
+  AppendPod(out, uint32_t{1u});
+  AppendByte(out, 1u);
+  AppendByte(out, 8u);
+  AppendByte(out, 0u);
+  AppendByte(out, static_cast<uint8_t>(streams.size()));
+  AppendPod(out, uint32_t{32u});
+  out.append(12u, '\0');
+  for (size_t i = 0; i < streams.size(); ++i) {
+    AppendPod(out, static_cast<uint64_t>(streams[i].size()));
+    AppendPod(out, uncompressedSizes[i]);
+  }
+  for (const std::string& stream : streams) {
+    out.append(stream);
+  }
+  return out;
+}
+
 std::string BinaryPlyHeader(uint32_t count) {
   return std::string("ply\n")
        + "format binary_little_endian 1.0\n"
@@ -225,6 +274,40 @@ TEST_CASE("SPLAT loader accepts valid records and rejects invalid record boundar
 
   const std::filesystem::path invalid = dir / "invalid.splat";
   WriteText(invalid, std::string(33u, '\0'));
+  loaded = LoadSceneFromFile(invalid.string());
+  CHECK_FALSE(loaded.ok());
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("SPZ loader accepts v4 Zstandard attribute streams") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_spz_v4_matrix");
+  const std::filesystem::path valid = dir / "valid.spz";
+  const std::string bytes = MakeSpzV4Record();
+  WriteText(valid, bytes);
+
+  auto loaded = LoadSceneFromFile(valid.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  const GaussianSet& set = loaded.value.splatSets.front();
+  REQUIRE(set.gaussians.size() == 1u);
+  const Gaussian& gaussian = set.gaussians.front();
+  CHECK(gaussian.position.x == doctest::Approx(1.0f));
+  CHECK(gaussian.position.y == doctest::Approx(2.0f));
+  CHECK(gaussian.position.z == doctest::Approx(3.0f));
+  CHECK(gaussian.scale.x == doctest::Approx(1.0f));
+  CHECK(gaussian.scale.y == doctest::Approx(std::exp(-1.0f)));
+  CHECK(gaussian.scale.z == doctest::Approx(std::exp(1.0f)));
+  CHECK(gaussian.rotation.w == doctest::Approx(1.0f));
+  CHECK(gaussian.sh[2] == doctest::Approx(-127.0f / 128.0f));
+  CHECK(gaussian.sh[18] == doctest::Approx(1.0f));
+  CHECK(set.bounds.valid);
+
+  std::string invalidBytes = bytes;
+  invalidBytes[15] = 5;
+  const std::filesystem::path invalid = dir / "invalid_stream_count.spz";
+  WriteText(invalid, invalidBytes);
   loaded = LoadSceneFromFile(invalid.string());
   CHECK_FALSE(loaded.ok());
 
