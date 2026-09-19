@@ -47,12 +47,9 @@ float DecodeLogScaleValue(float raw) {
   return std::max(std::exp(std::clamp(raw, -14.0f, 8.0f)), 1e-4f);
 }
 
-float DecodeScaleValue(float raw) {
+float DecodeLinearScaleValue(float raw) {
   if (!std::isfinite(raw)) {
     return 1e-4f;
-  }
-  if (raw <= 0.0f) {
-    return DecodeLogScaleValue(raw);
   }
   return std::max(raw, 1e-4f);
 }
@@ -352,9 +349,9 @@ GaussianSet ParseStandardGaussianSet(const ply::PlyFile& file, const std::string
       g.scale = {defaultPointScale, defaultPointScale, defaultPointScale};
     } else {
       g.scale = {
-          DecodeScaleValue(sx),
-          DecodeScaleValue(sy),
-          DecodeScaleValue(sz),
+          DecodeLinearScaleValue(sx),
+          DecodeLinearScaleValue(sy),
+          DecodeLinearScaleValue(sz),
       };
     }
 
@@ -1100,8 +1097,8 @@ StatusOr<PlyLoadResult> LoadBinaryStandardPlyFast(std::ifstream& file, const Fas
       } else if (!hasAnyScale) {
         g.scale = {1.0f, 1.0f, 1.0f};
       } else {
-        g.scale = {DecodeScaleValue(static_cast<float>(sx)), DecodeScaleValue(static_cast<float>(sy)),
-                   DecodeScaleValue(static_cast<float>(sz))};
+        g.scale = {DecodeLinearScaleValue(static_cast<float>(sx)), DecodeLinearScaleValue(static_cast<float>(sy)),
+                   DecodeLinearScaleValue(static_cast<float>(sz))};
       }
       g.rotation = Normalize({static_cast<float>(rot1), static_cast<float>(rot2), static_cast<float>(rot3), static_cast<float>(rot0)});
       g.opacity = static_cast<float>(opacity);

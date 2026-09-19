@@ -404,6 +404,52 @@ TEST_CASE("PLY loader normalizes integer colors by declared type") {
   std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("PLY loader clamps nonpositive linear scales") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_ply_linear_scales");
+
+  const std::filesystem::path ascii = dir / "linear_scales_ascii.ply";
+  WriteText(ascii,
+            "ply\n"
+            "format ascii 1.0\n"
+            "element vertex 1\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "property float scale_x\n"
+            "property float scale_y\n"
+            "property float scale_z\n"
+            "property uchar red\n"
+            "property uchar green\n"
+            "property uchar blue\n"
+            "end_header\n"
+            "0 0 0 0 -0.25 0.25 128 128 128\n");
+  auto loaded = LoadSceneFromFile(ascii.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  const Gaussian& asciiGaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(asciiGaussian.scale.x == doctest::Approx(1e-4f));
+  CHECK(asciiGaussian.scale.y == doctest::Approx(1e-4f));
+  CHECK(asciiGaussian.scale.z == doctest::Approx(0.25f));
+
+  const std::filesystem::path binary = dir / "linear_scales_binary.ply";
+  std::string bytes = BinaryPlyHeader(1u);
+  AppendBinaryPlyVertex(bytes, {0.0f, 0.0f, 0.0f}, {0.0f, -0.5f, 0.5f}, 1.0f, 128u, 128u, 128u);
+  WriteText(binary, bytes);
+
+  loaded = LoadSceneFromFile(binary.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  const Gaussian& binaryGaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(binaryGaussian.scale.x == doctest::Approx(1e-4f));
+  CHECK(binaryGaussian.scale.y == doctest::Approx(1e-4f));
+  CHECK(binaryGaussian.scale.z == doctest::Approx(0.5f));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("SPLAT loader accepts valid records and rejects invalid record boundaries") {
   const std::filesystem::path dir = MakeTempDir("directxsplat_splat_matrix");
   const std::filesystem::path valid = dir / "valid.splat";
