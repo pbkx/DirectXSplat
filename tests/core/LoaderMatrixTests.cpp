@@ -264,6 +264,40 @@ TEST_CASE("scene format detection covers manifest and extension matrix") {
   std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("directory loading prioritizes scene manifests") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_directory_manifest_priority");
+
+  const std::filesystem::path lodDir = dir / "lod";
+  std::filesystem::create_directories(lodDir);
+  std::string decoy = BinaryPlyHeader(1u);
+  AppendBinaryPlyVertex(decoy, {-10.0f, 0.0f, 0.0f}, {0.1f, 0.1f, 0.1f}, 1.0f, 128u, 128u, 128u);
+  WriteText(lodDir / "a.ply", decoy);
+  std::string detail = BinaryPlyHeader(1u);
+  AppendBinaryPlyVertex(detail, {2.0f, 0.0f, 0.0f}, {0.1f, 0.1f, 0.1f}, 1.0f, 128u, 128u, 128u);
+  WriteText(lodDir / "z.ply", detail);
+  WriteText(lodDir / "lod-meta.json",
+            "{\"filenames\":[\"z.ply\"],\"tree\":{\"lods\":{\"0\":{\"file\":0}}}}");
+
+  auto loaded = LoadSceneFromFile(lodDir.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  CHECK(loaded.value.splatSets.front().gaussians.front().position.x == doctest::Approx(2.0f));
+
+  const std::filesystem::path sogDir = dir / "sog";
+  WriteMinimalSogV2(sogDir, 5.0f);
+  WriteText(sogDir / "a.ply", decoy);
+
+  loaded = LoadSceneFromFile(sogDir.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  CHECK(loaded.value.splatSets.front().gaussians.front().position.x == doctest::Approx(5.0f));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("PLY loader accepts standard ascii point cloud and binary gaussian schemas") {
   const std::filesystem::path dir = MakeTempDir("directxsplat_ply_matrix");
 

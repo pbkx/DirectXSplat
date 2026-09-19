@@ -89,7 +89,21 @@ std::vector<fs::path> CollectSceneCandidates(const fs::path& folder) {
       out.push_back(entry.path());
     }
   }
-  std::sort(out.begin(), out.end());
+  auto priority = [](const fs::path& path) {
+    const std::string name = ToLower(path.filename().string());
+    if (name == "lod-meta.json") {
+      return 0;
+    }
+    if (name == "meta.json") {
+      return 1;
+    }
+    return 2;
+  };
+  std::sort(out.begin(), out.end(), [&](const fs::path& a, const fs::path& b) {
+    const int aPriority = priority(a);
+    const int bPriority = priority(b);
+    return aPriority != bPriority ? aPriority < bPriority : a < b;
+  });
   return out;
 }
 
