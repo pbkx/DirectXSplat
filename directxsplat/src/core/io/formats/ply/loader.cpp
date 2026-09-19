@@ -104,6 +104,20 @@ bool HasCompressedSchema(const ply::PlyFile& file) {
   return chunk->count > 0 && vertex->count > 0;
 }
 
+Status ValidateCompressedChunkCoverage(const ply::PlyFile& file) {
+  const ply::PlyElement* chunk = ply::FindElement(file, "chunk");
+  const ply::PlyElement* vertex = ply::FindElement(file, "vertex");
+  if (chunk == nullptr || vertex == nullptr || vertex->count == 0) {
+    return Status::Ok();
+  }
+
+  const uint32_t requiredChunks = 1u + (vertex->count - 1u) / 256u;
+  if (chunk->count < requiredChunks) {
+    return Status::Error("compressed ply has insufficient chunks");
+  }
+  return Status::Ok();
+}
+
 float Saturate(float v) {
   return std::max(0.0f, std::min(1.0f, v));
 }
@@ -436,9 +450,6 @@ GaussianSet ParseCompressedGaussianSet(const ply::PlyFile& file, const std::stri
   const float shC0 = 0.28209479177387814f;
   for (uint32_t i = 0; i < vertex->count; ++i) {
     const uint32_t chunkIndex = i / 256u;
-    if (chunkIndex >= chunk->count) {
-      break;
-    }
 
     const Vec3 p = Unpack111011(vertexPacked(i, "packed_position"));
     const Quat r = UnpackRotation(vertexPacked(i, "packed_rotation"));
@@ -1140,6 +1151,10 @@ StatusOr<PlyLoadResult> LoadBinaryCompressedPlyFast(std::ifstream& file, const F
   if (!HasCompressedSchema(layout)) {
     return StatusOr<PlyLoadResult>::Error("unsupported fast ply path");
   }
+  const Status chunkCoverage = ValidateCompressedChunkCoverage(layout);
+  if (!chunkCoverage.ok) {
+    return StatusOr<PlyLoadResult>::Error(chunkCoverage.message);
+  }
 
   const ply::PlyElement* chunkHeader = ply::FindElement(layout, "chunk");
   const ply::PlyElement* vertexHeader = ply::FindElement(layout, "vertex");
@@ -1225,9 +1240,6 @@ StatusOr<PlyLoadResult> LoadBinaryCompressedPlyFast(std::ifstream& file, const F
         }
 
         const uint32_t chunkIndex = row / 256u;
-        if (chunkIndex >= chunks.size()) {
-          break;
-        }
         const FastChunkInfo& chunk = chunks[chunkIndex];
         const Vec3 p = Unpack111011(packedPosition);
         const Quat r = UnpackRotation(packedRotation);
@@ -1370,6 +1382,10 @@ StatusOr<PlyLoadResult> PlyLoader::Load(const std::string& path, const std::stri
   PlyLoadResult out{};
   out.wasCompressed = HasCompressedSchema(plyResult.value);
   if (out.wasCompressed) {
+    const Status chunkCoverage = ValidateCompressedChunkCoverage(plyResult.value);
+    if (!chunkCoverage.ok) {
+      return StatusOr<PlyLoadResult>::Error(chunkCoverage.message);
+    }
     out.set = ParseCompressedGaussianSet(plyResult.value, setName, out.warnings);
   } else {
     out.set = ParseStandardGaussianSet(plyResult.value, setName, out.warnings);

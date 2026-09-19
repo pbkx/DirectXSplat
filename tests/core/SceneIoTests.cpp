@@ -56,7 +56,7 @@ std::string TinyPlyText(float x) {
        + std::to_string(x) + " 0 2 0.1 0.1 0.1 1 0 0 0 1 0 0 0\n";
 }
 
-void WriteCompressedPly(const std::filesystem::path& path, uint32_t packedRotation) {
+void WriteCompressedPly(const std::filesystem::path& path, uint32_t packedRotation, uint32_t vertexCount = 1u) {
   std::ofstream file(path, std::ios::binary);
   file << "ply\n"
           "format binary_little_endian 1.0\n"
@@ -79,7 +79,9 @@ void WriteCompressedPly(const std::filesystem::path& path, uint32_t packedRotati
           "property float max_r\n"
           "property float max_g\n"
           "property float max_b\n"
-          "element vertex 1\n"
+          "element vertex "
+       << vertexCount
+       << "\n"
           "property uint packed_position\n"
           "property uint packed_rotation\n"
           "property uint packed_scale\n"
@@ -95,7 +97,9 @@ void WriteCompressedPly(const std::filesystem::path& path, uint32_t packedRotati
   file.write(reinterpret_cast<const char*>(chunk), sizeof(chunk));
 
   const uint32_t vertex[] = {0u, packedRotation, 0u, 0x808080ffu};
-  file.write(reinterpret_cast<const char*>(vertex), sizeof(vertex));
+  for (uint32_t i = 0; i < vertexCount; ++i) {
+    file.write(reinterpret_cast<const char*>(vertex), sizeof(vertex));
+  }
 }
 
 bool IsFiniteGaussian(const Gaussian& gaussian) {
@@ -155,6 +159,19 @@ TEST_CASE("Scene IO preserves compressed PLY quaternion convention") {
   CHECK(gaussian.scale.x == doctest::Approx(0.1f));
   CHECK(gaussian.scale.y == doctest::Approx(0.01f));
   CHECK(gaussian.scale.z == doctest::Approx(0.001f));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("Scene IO rejects compressed PLY with insufficient chunks") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_compressed_chunk_coverage");
+  const std::filesystem::path path = dir / "insufficient_chunks.compressed.ply";
+  WriteCompressedPly(path, 0u, 257u);
+
+  const auto loaded = LoadSceneFromFile(path.string());
+  CHECK_FALSE(loaded.ok());
+  CHECK(loaded.status.message == "compressed ply has insufficient chunks");
 
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
