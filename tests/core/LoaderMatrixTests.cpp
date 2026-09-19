@@ -197,6 +197,27 @@ std::string MakeLinearCodebook() {
   return out;
 }
 
+void WriteMinimalSogV2(const std::filesystem::path& dir, float x) {
+  std::filesystem::create_directories(dir);
+  const float transformedX = std::copysign(std::log(std::abs(x) + 1.0f), x);
+  const std::string encodedX = std::to_string(transformedX);
+  const std::string codebook = MakeLinearCodebook();
+  WriteText(dir / "meta.json",
+            "{"
+            "\"version\":2,\"count\":1,"
+            "\"means\":{\"mins\":[" + encodedX + ",0,0],\"maxs\":[" + encodedX +
+                ",0,0],\"files\":[\"means_l.webp\",\"means_u.webp\"]},"
+            "\"scales\":{\"codebook\":" + codebook + ",\"files\":[\"scales.webp\"]},"
+            "\"quats\":{\"files\":[\"quats.webp\"]},"
+            "\"sh0\":{\"codebook\":" + codebook + ",\"files\":[\"sh0.webp\"]}"
+            "}");
+  WriteRgbaTga(dir / "means_l.webp", 1u, 1u, {0u, 0u, 0u, 255u});
+  WriteRgbaTga(dir / "means_u.webp", 1u, 1u, {0u, 0u, 0u, 255u});
+  WriteRgbaTga(dir / "scales.webp", 1u, 1u, {0u, 0u, 0u, 255u});
+  WriteRgbaTga(dir / "quats.webp", 1u, 1u, {128u, 128u, 128u, 252u});
+  WriteRgbaTga(dir / "sh0.webp", 1u, 1u, {0u, 0u, 0u, 128u});
+}
+
 bool IsFiniteSet(const GaussianSet& set) {
   for (const Gaussian& gaussian : set.gaussians) {
     if (!std::isfinite(gaussian.position.x) || !std::isfinite(gaussian.position.y) ||
@@ -447,6 +468,35 @@ TEST_CASE("SOG loader preserves v2 codebook decoding") {
   CHECK(gaussian.sh[17] == doctest::Approx(128.0f / 255.0f));
   CHECK(gaussian.sh[33] == doctest::Approx(1.0f));
   CHECK(IsFiniteSet(loaded.value.splatSets.front()));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("LOD loader includes the referenced environment SOG") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_lod_environment_matrix");
+  std::string detail = BinaryPlyHeader(1u);
+  AppendBinaryPlyVertex(detail, {1.0f, 0.0f, 0.0f}, {0.1f, 0.1f, 0.1f}, 1.0f, 128u, 128u, 128u);
+  WriteText(dir / "detail.ply", detail);
+  WriteMinimalSogV2(dir / "env", 5.0f);
+  WriteText(dir / "lod-meta.json",
+            "{"
+            "\"version\":1,\"count\":1,\"counts\":[1],\"lodLevels\":1,"
+            "\"environment\":\"env/meta.json\",\"filenames\":[\"detail.ply\"],"
+            "\"tree\":{\"bound\":{\"min\":[0,-1,-1],\"max\":[2,1,1]},"
+            "\"lods\":{\"0\":{\"file\":0,\"offset\":0,\"count\":1}}}"
+            "}");
+
+  const auto loaded = LoadSceneFromFile((dir / "lod-meta.json").string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 2u);
+  CHECK(loaded.value.splatSets[0].name == "detail");
+  CHECK(loaded.value.splatSets[0].gaussians.front().position.x == doctest::Approx(1.0f));
+  CHECK(loaded.value.splatSets[1].name == "env");
+  REQUIRE(loaded.value.splatSets[1].gaussians.size() == 1u);
+  CHECK(loaded.value.splatSets[1].gaussians.front().position.x == doctest::Approx(5.0f));
+  CHECK(loaded.value.sceneBounds.valid);
+  CHECK(loaded.value.sceneBounds.max.x == doctest::Approx(2.0f));
 
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);

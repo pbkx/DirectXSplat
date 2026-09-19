@@ -255,7 +255,7 @@ StatusOr<Scene> LoadHierarchicalLodScene(const fs::path& manifestPath, const Sce
 
   Scene scene{};
   scene.sourcePath = manifestPath.parent_path().string();
-  scene.splatSets.reserve(selectedFiles.size());
+  scene.splatSets.reserve(selectedFiles.size() + (json.contains("environment") ? 1u : 0u));
   const fs::path base = manifestPath.parent_path();
   for (size_t fileIndex : selectedFiles) {
     if (fileIndex >= filenames.size()) {
@@ -272,6 +272,23 @@ StatusOr<Scene> LoadHierarchicalLodScene(const fs::path& manifestPath, const Sce
     }
     scene.splatSets.push_back(std::move(setResult.value));
   }
+
+  if (json.contains("environment")) {
+    if (!json["environment"].is_string()) {
+      return StatusOr<Scene>::Error("invalid lod-meta.json environment");
+    }
+    const auto environmentPathResult = ResolveMetadataPath(base, json["environment"].get<std::string>());
+    if (!environmentPathResult.ok()) {
+      return StatusOr<Scene>::Error(environmentPathResult.status.message);
+    }
+    const fs::path environmentPath = environmentPathResult.value;
+    const auto environmentResult = LoadSingleSet(environmentPath, DefaultSetName(environmentPath));
+    if (!environmentResult.ok()) {
+      return StatusOr<Scene>::Error(environmentResult.status.message);
+    }
+    scene.splatSets.push_back(std::move(environmentResult.value));
+  }
+
   if (scene.splatSets.empty()) {
     return StatusOr<Scene>::Error("lod-meta.json did not resolve any loadable chunk files");
   }

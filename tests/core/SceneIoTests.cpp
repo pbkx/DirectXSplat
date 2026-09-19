@@ -378,6 +378,19 @@ TEST_CASE("Scene IO rejects hostile SOG and LOD metadata paths") {
   auto loaded = LoadSceneFromFile((lodDir / "lod-meta.json").string());
   CHECK_FALSE(loaded.ok());
 
+  const std::filesystem::path lodEnvironmentDir = dir / "lod_environment";
+  std::filesystem::create_directories(lodEnvironmentDir);
+  WriteFile(lodEnvironmentDir / "detail.ply", TinyPlyText(1.0f));
+  WriteFile(lodEnvironmentDir / "lod-meta.json",
+            "{"
+            "\"environment\":\"../outside.ply\","
+            "\"filenames\":[\"detail.ply\"],"
+            "\"tree\":{\"lods\":{\"0\":{\"file\":0}}}"
+            "}");
+  loaded = LoadSceneFromFile((lodEnvironmentDir / "lod-meta.json").string());
+  CHECK_FALSE(loaded.ok());
+  CHECK(loaded.status.message == "metadata path escapes scene folder");
+
   const std::filesystem::path invalidJsonDir = dir / "invalid_json";
   std::filesystem::create_directories(invalidJsonDir);
   WriteFile(invalidJsonDir / "lod-meta.json", "{\"filenames\":[");
