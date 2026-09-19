@@ -130,8 +130,9 @@ bool CameraController::HasMatrixOverride() const { return matrixOverride_.has_va
 
 void CameraController::UpdateFps(float dt, bool moveForward, bool moveBackward, bool moveLeft, bool moveRight,
                                  bool moveUp, bool moveDown, float lookDeltaX, float lookDeltaY,
-                                 float rollDelta, bool rotationEnabled) {
+                                 float rollDelta, bool rotationEnabled, float movementSpeedMultiplier) {
   dt = ClampFinite(dt, 0.0f, kMaxCameraDt, 0.0f);
+  movementSpeedMultiplier = Finite(movementSpeedMultiplier) ? std::max(movementSpeedMultiplier, 0.0f) : 1.0f;
   lookDeltaX = ClampFinite(lookDeltaX, -kMaxLookDelta, kMaxLookDelta, 0.0f);
   lookDeltaY = ClampFinite(lookDeltaY, -kMaxLookDelta, kMaxLookDelta, 0.0f);
   rollDelta = ClampFinite(rollDelta, -kMaxLookDelta, kMaxLookDelta, 0.0f);
@@ -169,7 +170,7 @@ void CameraController::UpdateFps(float dt, bool moveForward, bool moveBackward, 
   }
 
   if (moving) {
-    delta = Normalize(delta) * (state_.movementSpeed * accelerationFactor_ * dt);
+    delta = Normalize(delta) * (state_.movementSpeed * movementSpeedMultiplier * accelerationFactor_ * dt);
     state_.position = state_.position + delta;
     if (!Finite(state_.position)) {
       state_.position = {};

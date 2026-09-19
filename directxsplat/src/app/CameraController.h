@@ -53,7 +53,8 @@ class CameraController {
   bool HasMatrixOverride() const;
 
   void UpdateFps(float dt, bool moveForward, bool moveBackward, bool moveLeft, bool moveRight, bool moveUp,
-                 bool moveDown, float lookDeltaX, float lookDeltaY, float rollDelta, bool rotationEnabled);
+                 bool moveDown, float lookDeltaX, float lookDeltaY, float rollDelta, bool rotationEnabled,
+                 float movementSpeedMultiplier = 1.0f);
   void UpdateOrbit(float dt, float orbitDeltaX, float orbitDeltaY, float panDeltaX, float panDeltaY,
                    float wheelDelta);
   void UpdateTrackball(float dt, float orbitDeltaX, float orbitDeltaY, float panDeltaX, float panDeltaY,

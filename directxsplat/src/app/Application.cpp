@@ -24,6 +24,8 @@ namespace fs = std::filesystem;
 
 namespace {
 
+constexpr float kFastMovementMultiplier = 4.0f;
+
 Status ValidateCameraSet(const CameraSet& cameraSet) {
   for (const CameraParams& camera : cameraSet.cameras) {
     if (!ValidateCameraParamsForRendering(camera).ok) {
@@ -516,13 +518,14 @@ void Application::UpdateInput(float dt) {
   }
 
   if (state.navigatorMode == NavigatorMode::Fps) {
+    const bool cameraKeyboardEnabled = !io.WantTextInput;
     const bool mouseLook = (input.mouseButtonsDown[0] || input.mouseButtonsDown[1]) && !io.WantCaptureMouse;
     float lookDx = mouseLook ? ClampFinite(input.mouseDeltaX, -240.0f, 240.0f, 0.0f) : 0.0f;
     float lookDy = mouseLook ? ClampFinite(input.mouseDeltaY, -240.0f, 240.0f, 0.0f) : 0.0f;
     float rollDelta = 0.0f;
     constexpr float keyLookRate = 500.0f;
     constexpr float keyRollRate = 3.14159265359f / 0.002f;
-    if (!io.WantCaptureKeyboard) {
+    if (cameraKeyboardEnabled) {
       if (input.KeyDown('J')) lookDx -= keyLookRate * dt;
       if (input.KeyDown('L')) lookDx += keyLookRate * dt;
       if (input.KeyDown('I')) lookDy -= keyLookRate * dt;
@@ -532,19 +535,21 @@ void Application::UpdateInput(float dt) {
     }
     rollDelta = ClampFinite(rollDelta, -240.0f, 240.0f, 0.0f);
     const bool rotationEnabled = mouseLook || lookDx != 0.0f || lookDy != 0.0f || rollDelta != 0.0f;
-    const bool moveForward = !io.WantCaptureKeyboard && input.KeyDown('W');
-    const bool moveBackward = !io.WantCaptureKeyboard && input.KeyDown('S');
-    const bool moveLeft = !io.WantCaptureKeyboard && input.KeyDown('A');
-    const bool moveRight = !io.WantCaptureKeyboard && input.KeyDown('D');
+    const bool moveForward = cameraKeyboardEnabled && input.KeyDown('W');
+    const bool moveBackward = cameraKeyboardEnabled && input.KeyDown('S');
+    const bool moveLeft = cameraKeyboardEnabled && input.KeyDown('A');
+    const bool moveRight = cameraKeyboardEnabled && input.KeyDown('D');
     const bool moveUp = false;
     const bool moveDown = false;
+    const bool fastMovement = cameraKeyboardEnabled && input.KeyDown(VK_SHIFT);
     const bool moving = moveForward || moveBackward || moveLeft || moveRight || moveUp || moveDown;
     StopAnimationOnCameraEdit(animationUi_, rotationEnabled || moving);
     if (camera_.HasMatrixOverride() && (rotationEnabled || moving)) {
       cameraCutPending_ = true;
     }
     camera_.UpdateFps(dt, moveForward, moveBackward, moveLeft, moveRight, moveUp, moveDown,
-                      lookDx, lookDy, rollDelta, rotationEnabled);
+                      lookDx, lookDy, rollDelta, rotationEnabled,
+                      fastMovement ? kFastMovementMultiplier : 1.0f);
   } else {
     float orbitDx = 0.0f;
     float orbitDy = 0.0f;

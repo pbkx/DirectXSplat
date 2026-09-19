@@ -63,7 +63,7 @@ std::string FormatPinnedVisible(uint64_t visible, uint64_t total);
 std::array<const char*, 5> UiSectionLabels();
 std::array<const char*, 5> UiGraphicLabels();
 std::array<const char*, 11> UiSceneLabels();
-std::array<const char*, 3> UiCameraLabels();
+std::array<const char*, 8> UiCameraLabels();
 std::array<const char*, 2> UiAnimationLabels();
 void ClampCameraUiState(CameraUiState& state, size_t cameraCount);
 

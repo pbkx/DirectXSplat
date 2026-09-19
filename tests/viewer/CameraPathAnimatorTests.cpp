@@ -142,6 +142,22 @@ TEST_CASE("Camera snap uses default viewer fov") {
   CheckMatrix(controller.ViewMatrix(), expected.view);
 }
 
+TEST_CASE("FPS movement multiplier scales translation") {
+  directxsplat::CameraController normal;
+  directxsplat::CameraController fast;
+  directxsplat::CameraState state = normal.State();
+  state.movementSpeed = 2.0f;
+  normal.SetState(state);
+  fast.SetState(state);
+
+  normal.UpdateFps(0.02f, true, false, false, false, false, false, 0.0f, 0.0f, 0.0f, false, 1.0f);
+  fast.UpdateFps(0.02f, true, false, false, false, false, false, 0.0f, 0.0f, 0.0f, false, 4.0f);
+
+  CHECK(fast.State().position.x == doctest::Approx(normal.State().position.x * 4.0f));
+  CHECK(fast.State().position.y == doctest::Approx(normal.State().position.y * 4.0f));
+  CHECK(fast.State().position.z == doctest::Approx(normal.State().position.z * 4.0f));
+}
+
 TEST_CASE("Animator preserves loaded camera basis") {
   directxsplat::CameraSet cameras{};
   cameras.cameras.push_back(MakeLoadedCamera());

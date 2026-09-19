@@ -52,8 +52,8 @@ std::array<const char*, 11> UiSceneLabels() {
   return {"Render type", "color", "alpha", "depth", "Background", "R", "G", "B", "scale", "projection", "dilation"};
 }
 
-std::array<const char*, 3> UiCameraLabels() {
-  return {"Show camera frames", "frame size", "index"};
+std::array<const char*, 8> UiCameraLabels() {
+  return {"move speed", "turn speed", "Acceleration", "near clip", "far clip", "Show camera frames", "frame size", "index"};
 }
 
 std::array<const char*, 2> UiAnimationLabels() {
@@ -620,20 +620,71 @@ void RenderTraversalControls(UiFrameData& frame, UiActions& actions) {
 }
 
 void RenderCameraSection(UiFrameData& frame, UiActions& actions) {
+  CameraState cameraState = frame.camera->State();
+  bool cameraStateChanged = false;
+
+  const auto labels = UiCameraLabels();
+  ImGui::SetNextItemWidth(128.0f);
+  cameraStateChanged |= ImGui::SliderFloat("##movespeed",
+                                          &cameraState.movementSpeed,
+                                          0.001f,
+                                          100.0f,
+                                          "%.3f",
+                                          ImGuiSliderFlags_Logarithmic);
+  ImGui::SameLine();
+  ImGui::TextUnformatted(labels[0]);
+  ImGui::SetNextItemWidth(128.0f);
+  cameraStateChanged |= ImGui::SliderFloat("##turnspeed",
+                                          &cameraState.rotationSpeed,
+                                          0.05f,
+                                          5.0f,
+                                          "%.2f",
+                                          ImGuiSliderFlags_Logarithmic);
+  ImGui::SameLine();
+  ImGui::TextUnformatted(labels[1]);
+  cameraStateChanged |= ImGui::Checkbox(labels[2], &cameraState.useAcceleration);
+  ImGui::SetNextItemWidth(128.0f);
+  if (ImGui::SliderFloat("##nearclip",
+                         &cameraState.nearPlane,
+                         0.001f,
+                         10.0f,
+                         "%.4f",
+                         ImGuiSliderFlags_Logarithmic)) {
+    cameraState.farPlane = std::max(cameraState.farPlane, cameraState.nearPlane + 0.001f);
+    cameraStateChanged = true;
+  }
+  ImGui::SameLine();
+  ImGui::TextUnformatted(labels[3]);
+  ImGui::SetNextItemWidth(128.0f);
+  const float minFarPlane = std::max(1.0f, cameraState.nearPlane + 0.001f);
+  if (ImGui::SliderFloat("##farclip",
+                         &cameraState.farPlane,
+                         minFarPlane,
+                         10000.0f,
+                         "%.1f",
+                         ImGuiSliderFlags_Logarithmic)) {
+    cameraStateChanged = true;
+  }
+  ImGui::SameLine();
+  ImGui::TextUnformatted(labels[4]);
+  if (cameraStateChanged) {
+    frame.camera->SetState(cameraState);
+  }
+
+  ImGui::Separator();
   CameraUiState localState{};
   CameraUiState& state = frame.cameraUi != nullptr ? *frame.cameraUi : localState;
   ClampCameraUiState(state, frame.cameraCount);
 
-  const auto labels = UiCameraLabels();
   const bool disabled = frame.cameraCount == 0;
   if (disabled) {
     ImGui::BeginDisabled();
   }
-  ImGui::Checkbox(labels[0], &state.showCameraFrames);
-  ImGui::SliderFloat(labels[1], &state.frameSize, 0.001f, 10.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+  ImGui::Checkbox(labels[5], &state.showCameraFrames);
+  ImGui::SliderFloat(labels[6], &state.frameSize, 0.001f, 10.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
   const int maxIndex = frame.cameraCount > 0 ? static_cast<int>(frame.cameraCount - 1u) : 0;
   int index = state.index;
-  if (ImGui::SliderInt(labels[2], &index, 0, maxIndex)) {
+  if (ImGui::SliderInt(labels[7], &index, 0, maxIndex)) {
     state.index = index;
     ClampCameraUiState(state, frame.cameraCount);
     if (actions.selectCamera) {
