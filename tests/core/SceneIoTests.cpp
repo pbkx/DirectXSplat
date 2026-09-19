@@ -56,6 +56,48 @@ std::string TinyPlyText(float x) {
        + std::to_string(x) + " 0 2 0.1 0.1 0.1 1 0 0 0 1 0 0 0\n";
 }
 
+void WriteCompressedPly(const std::filesystem::path& path, uint32_t packedRotation) {
+  std::ofstream file(path, std::ios::binary);
+  file << "ply\n"
+          "format binary_little_endian 1.0\n"
+          "element chunk 1\n"
+          "property float min_x\n"
+          "property float min_y\n"
+          "property float min_z\n"
+          "property float max_x\n"
+          "property float max_y\n"
+          "property float max_z\n"
+          "property float min_scale_x\n"
+          "property float min_scale_y\n"
+          "property float min_scale_z\n"
+          "property float max_scale_x\n"
+          "property float max_scale_y\n"
+          "property float max_scale_z\n"
+          "property float min_r\n"
+          "property float min_g\n"
+          "property float min_b\n"
+          "property float max_r\n"
+          "property float max_g\n"
+          "property float max_b\n"
+          "element vertex 1\n"
+          "property uint packed_position\n"
+          "property uint packed_rotation\n"
+          "property uint packed_scale\n"
+          "property uint packed_color\n"
+          "end_header\n";
+
+  const float chunk[] = {
+      0.0f, 0.0f, 2.0f, 0.0f, 0.0f, 2.0f,
+      std::log(0.1f), std::log(0.01f), std::log(0.001f),
+      std::log(0.1f), std::log(0.01f), std::log(0.001f),
+      0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f,
+  };
+  file.write(reinterpret_cast<const char*>(chunk), sizeof(chunk));
+
+  const uint32_t vertex[] = {0u, packedRotation, 0u, 0x808080ffu};
+  file.write(reinterpret_cast<const char*>(vertex), sizeof(vertex));
+}
+
 bool IsFiniteGaussian(const Gaussian& gaussian) {
   if (!std::isfinite(gaussian.position.x) || !std::isfinite(gaussian.position.y) || !std::isfinite(gaussian.position.z)) {
     return false;
@@ -90,6 +132,32 @@ TEST_CASE("Scene IO loads tiny ASCII PLY") {
     CHECK(gaussian.scale.y > 0.0f);
     CHECK(gaussian.scale.z > 0.0f);
   }
+}
+
+TEST_CASE("Scene IO preserves compressed PLY quaternion convention") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_compressed_rotation");
+  const std::filesystem::path path = dir / "rotation.compressed.ply";
+
+  // Largest component is rot_1, representing the wxyz quaternion (0, 1, 0, 0).
+  constexpr uint32_t packedRotation = (1u << 30u) | (512u << 20u) | (512u << 10u) | 512u;
+  WriteCompressedPly(path, packedRotation);
+
+  const auto loaded = LoadSceneFromFile(path.string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+
+  const Gaussian& gaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(gaussian.rotation.x == doctest::Approx(1.0f).epsilon(0.002f));
+  CHECK(std::abs(gaussian.rotation.y) < 0.002f);
+  CHECK(std::abs(gaussian.rotation.z) < 0.002f);
+  CHECK(std::abs(gaussian.rotation.w) < 0.002f);
+  CHECK(gaussian.scale.x == doctest::Approx(0.1f));
+  CHECK(gaussian.scale.y == doctest::Approx(0.01f));
+  CHECK(gaussian.scale.z == doctest::Approx(0.001f));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
 }
 
 TEST_CASE("Scene IO rejects empty path") {

@@ -165,16 +165,24 @@ Quat UnpackRotation(uint32_t value) {
   const float c = (UnpackUnorm(value, 10) - 0.5f) * norm;
   const float m = std::sqrt(std::max(0.0f, 1.0f - (a * a + b * b + c * c)));
   const uint32_t which = value >> 30;
+  std::array<float, 4> rotation{};
   switch (which) {
     case 0:
-      return {m, a, b, c};
+      rotation = {m, a, b, c};
+      break;
     case 1:
-      return {a, m, b, c};
+      rotation = {a, m, b, c};
+      break;
     case 2:
-      return {a, b, m, c};
+      rotation = {a, b, m, c};
+      break;
     default:
-      return {a, b, c, m};
+      rotation = {a, b, c, m};
+      break;
   }
+
+  // Compressed PLY stores rot_0..rot_3 as wxyz; renderer quaternions use xyzw.
+  return {rotation[1], rotation[2], rotation[3], rotation[0]};
 }
 
 bool UseBlockShLayout(const std::vector<std::string>& comments) {
