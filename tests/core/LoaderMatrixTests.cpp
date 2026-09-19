@@ -162,6 +162,41 @@ void WriteSplatRecord(const std::filesystem::path& path) {
   WriteText(path, bytes);
 }
 
+std::string MakeRgbaTga(uint16_t width, uint16_t height, const std::vector<uint8_t>& rgba) {
+  std::string out(18u, '\0');
+  out[2] = 2;
+  out[12] = static_cast<char>(width & 0xFFu);
+  out[13] = static_cast<char>((width >> 8u) & 0xFFu);
+  out[14] = static_cast<char>(height & 0xFFu);
+  out[15] = static_cast<char>((height >> 8u) & 0xFFu);
+  out[16] = 32;
+  out[17] = 0x28;
+  for (size_t i = 0; i + 3u < rgba.size(); i += 4u) {
+    AppendByte(out, rgba[i + 2u]);
+    AppendByte(out, rgba[i + 1u]);
+    AppendByte(out, rgba[i + 0u]);
+    AppendByte(out, rgba[i + 3u]);
+  }
+  return out;
+}
+
+void WriteRgbaTga(const std::filesystem::path& path, uint16_t width, uint16_t height,
+                  const std::vector<uint8_t>& rgba) {
+  WriteText(path, MakeRgbaTga(width, height, rgba));
+}
+
+std::string MakeLinearCodebook() {
+  std::string out = "[";
+  for (uint32_t i = 0; i < 256u; ++i) {
+    if (i != 0) {
+      out += ',';
+    }
+    out += std::to_string(static_cast<float>(i) / 255.0f);
+  }
+  out += ']';
+  return out;
+}
+
 bool IsFiniteSet(const GaussianSet& set) {
   for (const Gaussian& gaussian : set.gaussians) {
     if (!std::isfinite(gaussian.position.x) || !std::isfinite(gaussian.position.y) ||
@@ -315,6 +350,108 @@ TEST_CASE("SPZ loader accepts v4 Zstandard attribute streams") {
   std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("SOG loader accepts legacy v1 range-quantized assets") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_sog_v1_matrix");
+  WriteText(dir / "meta.json",
+            "{"
+            "\"means\":{\"shape\":[1,3],\"mins\":[-0.69314718056,0,-1],\"maxs\":[0,1.09861228867,1],"
+            "\"files\":[\"means_l.webp\",\"means_u.webp\"]},"
+            "\"scales\":{\"mins\":[-2,-1,0],\"maxs\":[0,1,2],\"files\":[\"scales.webp\"]},"
+            "\"quats\":{\"files\":[\"quats.webp\"]},"
+            "\"sh0\":{\"mins\":[-1,-2,-3,-4],\"maxs\":[1,2,3,4],\"files\":[\"sh0.webp\"]},"
+            "\"shN\":{\"mins\":-2,\"maxs\":2,\"files\":[\"shN_centroids.webp\",\"shN_labels.webp\"]}"
+            "}");
+
+  WriteRgbaTga(dir / "means_l.webp", 1u, 1u, {0u, 255u, 0u, 255u});
+  WriteRgbaTga(dir / "means_u.webp", 1u, 1u, {0u, 255u, 128u, 255u});
+  WriteRgbaTga(dir / "scales.webp", 1u, 1u, {0u, 128u, 255u, 255u});
+  WriteRgbaTga(dir / "quats.webp", 1u, 1u, {128u, 128u, 128u, 252u});
+  WriteRgbaTga(dir / "sh0.webp", 1u, 1u, {0u, 128u, 255u, 191u});
+  WriteRgbaTga(dir / "shN_labels.webp", 1u, 1u, {0u, 0u, 0u, 255u});
+  std::vector<uint8_t> centroids(192u * 4u, 0u);
+  centroids[0] = 0u;
+  centroids[1] = 128u;
+  centroids[2] = 255u;
+  centroids[3] = 255u;
+  WriteRgbaTga(dir / "shN_centroids.webp", 192u, 1u, centroids);
+
+  const auto loaded = LoadSceneFromFile((dir / "meta.json").string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  const Gaussian& gaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(gaussian.position.x == doctest::Approx(-1.0f));
+  CHECK(gaussian.position.y == doctest::Approx(2.0f));
+  CHECK(gaussian.position.z == doctest::Approx(0.0f).epsilon(0.001));
+  CHECK(gaussian.scale.x == doctest::Approx(std::exp(-2.0f)));
+  CHECK(gaussian.scale.y == doctest::Approx(std::exp(1.0f / 255.0f)));
+  CHECK(gaussian.scale.z == doctest::Approx(std::exp(2.0f)));
+  CHECK(gaussian.rotation.w > 0.99f);
+  CHECK(gaussian.sh[0] == doctest::Approx(-1.0f));
+  CHECK(gaussian.sh[16] == doctest::Approx(2.0f / 255.0f));
+  CHECK(gaussian.sh[32] == doctest::Approx(3.0f));
+  CHECK(gaussian.opacity == doctest::Approx(508.0f / 255.0f));
+  CHECK(gaussian.sh[1] == doctest::Approx(-2.0f));
+  CHECK(gaussian.sh[17] == doctest::Approx(2.0f / 255.0f));
+  CHECK(gaussian.sh[33] == doctest::Approx(2.0f));
+  CHECK(loaded.value.splatSets.front().bounds.valid);
+  CHECK(IsFiniteSet(loaded.value.splatSets.front()));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("SOG loader preserves v2 codebook decoding") {
+  const std::filesystem::path dir = MakeTempDir("directxsplat_sog_v2_matrix");
+  const std::string codebook = MakeLinearCodebook();
+  WriteText(dir / "meta.json",
+            "{"
+            "\"version\":2,\"count\":1,"
+            "\"means\":{\"mins\":[-0.69314718056,0,-1],\"maxs\":[0,1.09861228867,1],"
+            "\"files\":[\"means_l.webp\",\"means_u.webp\"]},"
+            "\"scales\":{\"codebook\":" + codebook + ",\"files\":[\"scales.webp\"]},"
+            "\"quats\":{\"files\":[\"quats.webp\"]},"
+            "\"sh0\":{\"codebook\":" + codebook + ",\"files\":[\"sh0.webp\"]},"
+            "\"shN\":{\"count\":1,\"bands\":1,\"codebook\":" + codebook +
+                ",\"files\":[\"shN_centroids.webp\",\"shN_labels.webp\"]}"
+            "}");
+
+  WriteRgbaTga(dir / "means_l.webp", 1u, 1u, {0u, 255u, 0u, 255u});
+  WriteRgbaTga(dir / "means_u.webp", 1u, 1u, {0u, 255u, 128u, 255u});
+  WriteRgbaTga(dir / "scales.webp", 1u, 1u, {0u, 128u, 255u, 255u});
+  WriteRgbaTga(dir / "quats.webp", 1u, 1u, {128u, 128u, 128u, 252u});
+  WriteRgbaTga(dir / "sh0.webp", 1u, 1u, {0u, 128u, 255u, 191u});
+  WriteRgbaTga(dir / "shN_labels.webp", 1u, 1u, {0u, 0u, 0u, 255u});
+  std::vector<uint8_t> centroids(192u * 4u, 0u);
+  centroids[0] = 0u;
+  centroids[1] = 128u;
+  centroids[2] = 255u;
+  centroids[3] = 255u;
+  WriteRgbaTga(dir / "shN_centroids.webp", 192u, 1u, centroids);
+
+  const auto loaded = LoadSceneFromFile((dir / "meta.json").string());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value.splatSets.size() == 1u);
+  REQUIRE(loaded.value.splatSets.front().gaussians.size() == 1u);
+  const Gaussian& gaussian = loaded.value.splatSets.front().gaussians.front();
+  CHECK(gaussian.position.x == doctest::Approx(-1.0f));
+  CHECK(gaussian.position.y == doctest::Approx(2.0f));
+  CHECK(gaussian.scale.x == doctest::Approx(1.0f));
+  CHECK(gaussian.scale.y == doctest::Approx(std::exp(128.0f / 255.0f)));
+  CHECK(gaussian.scale.z == doctest::Approx(std::exp(1.0f)));
+  CHECK(gaussian.sh[0] == doctest::Approx(0.0f));
+  CHECK(gaussian.sh[16] == doctest::Approx(128.0f / 255.0f));
+  CHECK(gaussian.sh[32] == doctest::Approx(1.0f));
+  CHECK(gaussian.opacity == doctest::Approx(std::log((191.0f / 255.0f) / (64.0f / 255.0f))));
+  CHECK(gaussian.sh[1] == doctest::Approx(0.0f));
+  CHECK(gaussian.sh[17] == doctest::Approx(128.0f / 255.0f));
+  CHECK(gaussian.sh[33] == doctest::Approx(1.0f));
+  CHECK(IsFiniteSet(loaded.value.splatSets.front()));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("raw PLY writer roundtrips through raw and scene loaders") {
   const std::filesystem::path dir = MakeTempDir("directxsplat_ply_writer_roundtrip");
   const std::filesystem::path path = dir / "roundtrip.ply";
@@ -429,11 +566,11 @@ TEST_CASE("SOG metadata schema variants fail through StatusOr instead of excepti
 
   const std::array<std::string, 6> cases{{
       "{}",
-      "{\"count\":\"1\"}",
-      "{\"count\":1,\"means\":[]}",
-      "{\"count\":1,\"means\":{\"files\":\"bad\"}}",
-      "{\"count\":1,\"means\":{\"files\":[\"missing.png\",\"missing.png\"],\"mins\":[0],\"maxs\":[1]}}",
-      "{\"count\":1,\"means\":{\"files\":[\"missing.png\",\"missing.png\"],\"mins\":[0,0,0],\"maxs\":[1,1,1]},\"quats\":null}",
+      "{\"version\":2,\"count\":\"1\"}",
+      "{\"version\":2,\"count\":1,\"means\":[]}",
+      "{\"version\":2,\"count\":1,\"means\":{\"files\":\"bad\"}}",
+      "{\"version\":2,\"count\":1,\"means\":{\"files\":[\"missing.png\",\"missing.png\"],\"mins\":[0],\"maxs\":[1]}}",
+      "{\"version\":2,\"count\":1,\"means\":{\"files\":[\"missing.png\",\"missing.png\"],\"mins\":[0,0,0],\"maxs\":[1,1,1]},\"quats\":null}",
   }};
 
   for (size_t i = 0; i < cases.size(); ++i) {

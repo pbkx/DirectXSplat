@@ -403,6 +403,7 @@ TEST_CASE("Scene IO rejects hostile SOG and LOD metadata paths") {
   std::filesystem::create_directories(sogDir);
   WriteFile(sogDir / "meta.json",
             "{"
+            "\"version\":2,"
             "\"count\":1,"
             "\"means\":{\"files\":[\"../outside.png\",\"inside.png\"],\"mins\":[0,0,0],\"maxs\":[1,1,1]},"
             "\"quats\":{\"files\":[\"inside.png\"]},"
@@ -414,7 +415,7 @@ TEST_CASE("Scene IO rejects hostile SOG and LOD metadata paths") {
 
   const std::filesystem::path hugeSogDir = dir / "huge_sog";
   std::filesystem::create_directories(hugeSogDir);
-  WriteFile(hugeSogDir / "meta.json", "{\"count\":10000001}");
+  WriteFile(hugeSogDir / "meta.json", "{\"version\":2,\"count\":10000001}");
   loaded = LoadSceneFromFile((hugeSogDir / "meta.json").string());
   CHECK_FALSE(loaded.ok());
   CHECK(loaded.status.message == "sog scene is too large");

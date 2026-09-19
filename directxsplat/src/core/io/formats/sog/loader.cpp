@@ -334,7 +334,21 @@ StatusOr<GaussianSet> SogLoader::Load(const std::string& path, const std::string
     return StatusOr<GaussianSet>::Error("invalid sog meta json");
   }
 
-  const uint32_t count = meta.at("count").get<uint32_t>();
+  const bool legacyV1 = !meta.contains("version");
+  if (!legacyV1 && meta.at("version").get<uint32_t>() != 2u) {
+    return StatusOr<GaussianSet>::Error("unsupported sog version");
+  }
+
+  uint32_t count = 0;
+  if (legacyV1) {
+    const auto& shape = meta.at("means").at("shape");
+    if (!shape.is_array() || shape.size() < 2) {
+      return StatusOr<GaussianSet>::Error("invalid sog v1 means shape");
+    }
+    count = shape.at(0).get<uint32_t>();
+  } else {
+    count = meta.at("count").get<uint32_t>();
+  }
   if (count == 0) {
     return StatusOr<GaussianSet>::Error("sog scene has zero count");
   }
@@ -456,22 +470,39 @@ StatusOr<GaussianSet> SogLoader::Load(const std::string& path, const std::string
       return StatusOr<GaussianSet>::Error("sog scale image too small");
     }
 
-    std::array<float, 256> scaleCodebook{};
-    const auto& codebookJson = scalesJson.at("codebook");
-    if (codebookJson.size() < 256) {
-      return StatusOr<GaussianSet>::Error("invalid sog scale codebook");
-    }
-    for (size_t i = 0; i < 256; ++i) {
-      scaleCodebook[i] = codebookJson.at(i).get<float>();
-    }
+    if (legacyV1) {
+      std::array<float, 3> mins{};
+      std::array<float, 3> maxs{};
+      for (uint32_t i = 0; i < 3; ++i) {
+        mins[i] = scalesJson.at("mins").at(i).get<float>();
+        maxs[i] = scalesJson.at("maxs").at(i).get<float>();
+      }
+      for (uint32_t i = 0; i < count; ++i) {
+        const size_t o = static_cast<size_t>(i) * 4;
+        set.gaussians[i].scale = {
+            DecodeLogScaleValue(Lerp(mins[0], maxs[0], static_cast<float>(scales.value.rgba[o + 0]) / 255.0f)),
+            DecodeLogScaleValue(Lerp(mins[1], maxs[1], static_cast<float>(scales.value.rgba[o + 1]) / 255.0f)),
+            DecodeLogScaleValue(Lerp(mins[2], maxs[2], static_cast<float>(scales.value.rgba[o + 2]) / 255.0f)),
+        };
+      }
+    } else {
+      std::array<float, 256> scaleCodebook{};
+      const auto& codebookJson = scalesJson.at("codebook");
+      if (codebookJson.size() < 256) {
+        return StatusOr<GaussianSet>::Error("invalid sog scale codebook");
+      }
+      for (size_t i = 0; i < 256; ++i) {
+        scaleCodebook[i] = codebookJson.at(i).get<float>();
+      }
 
-    for (uint32_t i = 0; i < count; ++i) {
-      const size_t o = static_cast<size_t>(i) * 4;
-      set.gaussians[i].scale = {
-          DecodeLogScaleValue(scaleCodebook[scales.value.rgba[o + 0]]),
-          DecodeLogScaleValue(scaleCodebook[scales.value.rgba[o + 1]]),
-          DecodeLogScaleValue(scaleCodebook[scales.value.rgba[o + 2]]),
-      };
+      for (uint32_t i = 0; i < count; ++i) {
+        const size_t o = static_cast<size_t>(i) * 4;
+        set.gaussians[i].scale = {
+            DecodeLogScaleValue(scaleCodebook[scales.value.rgba[o + 0]]),
+            DecodeLogScaleValue(scaleCodebook[scales.value.rgba[o + 1]]),
+            DecodeLogScaleValue(scaleCodebook[scales.value.rgba[o + 2]]),
+        };
+      }
     }
   }
 
@@ -490,35 +521,105 @@ StatusOr<GaussianSet> SogLoader::Load(const std::string& path, const std::string
       return StatusOr<GaussianSet>::Error("sog sh0 image too small");
     }
 
-    std::array<float, 256> sh0Codebook{};
-    const auto& sh0CodebookJson = sh0Json.at("codebook");
-    if (sh0CodebookJson.size() < 256) {
-      return StatusOr<GaussianSet>::Error("invalid sog sh0 codebook");
-    }
-    for (size_t i = 0; i < 256; ++i) {
-      sh0Codebook[i] = sh0CodebookJson.at(i).get<float>();
-    }
+    if (legacyV1) {
+      std::array<float, 4> mins{};
+      std::array<float, 4> maxs{};
+      for (uint32_t i = 0; i < 4; ++i) {
+        mins[i] = sh0Json.at("mins").at(i).get<float>();
+        maxs[i] = sh0Json.at("maxs").at(i).get<float>();
+      }
+      for (uint32_t i = 0; i < count; ++i) {
+        const size_t o = static_cast<size_t>(i) * 4;
+        set.gaussians[i].sh[0] =
+            Lerp(mins[0], maxs[0], static_cast<float>(sh0.value.rgba[o + 0]) / 255.0f);
+        set.gaussians[i].sh[16] =
+            Lerp(mins[1], maxs[1], static_cast<float>(sh0.value.rgba[o + 1]) / 255.0f);
+        set.gaussians[i].sh[32] =
+            Lerp(mins[2], maxs[2], static_cast<float>(sh0.value.rgba[o + 2]) / 255.0f);
+        set.gaussians[i].opacity =
+            Lerp(mins[3], maxs[3], static_cast<float>(sh0.value.rgba[o + 3]) / 255.0f);
+      }
+    } else {
+      std::array<float, 256> sh0Codebook{};
+      const auto& sh0CodebookJson = sh0Json.at("codebook");
+      if (sh0CodebookJson.size() < 256) {
+        return StatusOr<GaussianSet>::Error("invalid sog sh0 codebook");
+      }
+      for (size_t i = 0; i < 256; ++i) {
+        sh0Codebook[i] = sh0CodebookJson.at(i).get<float>();
+      }
 
-    for (uint32_t i = 0; i < count; ++i) {
-      const size_t o = static_cast<size_t>(i) * 4;
-      set.gaussians[i].sh[0] = sh0Codebook[sh0.value.rgba[o + 0]];
-      set.gaussians[i].sh[16] = sh0Codebook[sh0.value.rgba[o + 1]];
-      set.gaussians[i].sh[32] = sh0Codebook[sh0.value.rgba[o + 2]];
-      set.gaussians[i].opacity = SigmoidInv(static_cast<float>(sh0.value.rgba[o + 3]) / 255.0f);
+      for (uint32_t i = 0; i < count; ++i) {
+        const size_t o = static_cast<size_t>(i) * 4;
+        set.gaussians[i].sh[0] = sh0Codebook[sh0.value.rgba[o + 0]];
+        set.gaussians[i].sh[16] = sh0Codebook[sh0.value.rgba[o + 1]];
+        set.gaussians[i].sh[32] = sh0Codebook[sh0.value.rgba[o + 2]];
+        set.gaussians[i].opacity = SigmoidInv(static_cast<float>(sh0.value.rgba[o + 3]) / 255.0f);
+      }
     }
   }
 
   if (meta.contains("shN")) {
     const auto& shN = meta.at("shN");
-    const uint32_t bands = shN.value("bands", 0u);
-    const uint32_t paletteCount = shN.value("count", 0u);
-    uint32_t coeffs = 0;
-    if (bands == 1) coeffs = 3;
-    if (bands == 2) coeffs = 8;
-    if (bands == 3) coeffs = 15;
+    const auto& shNFiles = shN.at("files");
+    if (!shNFiles.is_array() || shNFiles.size() < 2) {
+      return StatusOr<GaussianSet>::Error("invalid sog shN files");
+    }
 
-    if (coeffs > 0 && paletteCount > 0) {
-      std::array<float, 256> shNCodebook{};
+    std::vector<uint16_t> shLabels;
+    shLabels.resize(count);
+    {
+      const auto labelsBytes = loadAsset(shNFiles.at(1).get<std::string>());
+      if (!labelsBytes.ok()) {
+        return StatusOr<GaussianSet>::Error("failed to read sog shN assets");
+      }
+      const auto labels = DecodeImageFromMemoryWic(labelsBytes.value);
+      if (!labels.ok()) {
+        return StatusOr<GaussianSet>::Error("failed to decode sog shN assets");
+      }
+      if (!HasImagePixels(labels.value, count)) {
+        return StatusOr<GaussianSet>::Error("sog shN label image too small");
+      }
+      for (uint32_t i = 0; i < count; ++i) {
+        const size_t lo = static_cast<size_t>(i) * 4;
+        shLabels[i] = static_cast<uint16_t>(static_cast<uint32_t>(labels.value.rgba[lo + 0]) |
+                                            (static_cast<uint32_t>(labels.value.rgba[lo + 1]) << 8));
+      }
+    }
+
+    const auto centroidBytes = loadAsset(shNFiles.at(0).get<std::string>());
+    if (!centroidBytes.ok()) {
+      return StatusOr<GaussianSet>::Error("failed to read sog shN assets");
+    }
+    const auto centroids = DecodeImageFromMemoryWic(centroidBytes.value);
+    if (!centroids.ok()) {
+      return StatusOr<GaussianSet>::Error("failed to decode sog shN assets");
+    }
+
+    uint32_t coeffs = 0;
+    uint32_t paletteCount = 0;
+    std::array<float, 256> shNCodebook{};
+    float shNMin = 0.0f;
+    float shNMax = 0.0f;
+    if (legacyV1) {
+      if (centroids.value.width == 192u) coeffs = 3;
+      if (centroids.value.width == 512u) coeffs = 8;
+      if (centroids.value.width == 960u) coeffs = 15;
+      if (coeffs == 0) {
+        return StatusOr<GaussianSet>::Error("invalid sog v1 shN palette width");
+      }
+      paletteCount = (centroids.value.width / coeffs) * centroids.value.height;
+      shNMin = shN.at("mins").get<float>();
+      shNMax = shN.at("maxs").get<float>();
+    } else {
+      const uint32_t bands = shN.value("bands", 0u);
+      if (bands == 1) coeffs = 3;
+      if (bands == 2) coeffs = 8;
+      if (bands == 3) coeffs = 15;
+      paletteCount = shN.value("count", 0u);
+      if (coeffs == 0 || paletteCount == 0) {
+        return StatusOr<GaussianSet>::Error("invalid sog shN metadata");
+      }
       const auto& shNCodebookJson = shN.at("codebook");
       if (shNCodebookJson.size() < 256) {
         return StatusOr<GaussianSet>::Error("invalid sog shN codebook");
@@ -526,60 +627,32 @@ StatusOr<GaussianSet> SogLoader::Load(const std::string& path, const std::string
       for (size_t i = 0; i < 256; ++i) {
         shNCodebook[i] = shNCodebookJson.at(i).get<float>();
       }
+    }
 
-      const auto& shNFiles = shN.at("files");
-      if (!shNFiles.is_array() || shNFiles.size() < 2) {
-        return StatusOr<GaussianSet>::Error("invalid sog shN files");
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t label = shLabels[i];
+      if (label >= paletteCount) {
+        continue;
       }
 
-      std::vector<uint16_t> shLabels;
-      shLabels.resize(count);
-      {
-        const auto labelsBytes = loadAsset(shNFiles.at(1).get<std::string>());
-        if (!labelsBytes.ok()) {
-          return StatusOr<GaussianSet>::Error("failed to read sog shN assets");
+      for (uint32_t c = 0; c < coeffs; ++c) {
+        const uint32_t u = (label % 64u) * coeffs + c;
+        const uint32_t v = label / 64u;
+        if (u >= centroids.value.width || v >= centroids.value.height) {
+          continue;
         }
-        const auto labels = DecodeImageFromMemoryWic(labelsBytes.value);
-        if (!labels.ok()) {
-          return StatusOr<GaussianSet>::Error("failed to decode sog shN assets");
-        }
-        if (!HasImagePixels(labels.value, count)) {
-          return StatusOr<GaussianSet>::Error("sog shN label image too small");
-        }
-        for (uint32_t i = 0; i < count; ++i) {
-          const size_t lo = static_cast<size_t>(i) * 4;
-          shLabels[i] = static_cast<uint16_t>(static_cast<uint32_t>(labels.value.rgba[lo + 0]) |
-                                              (static_cast<uint32_t>(labels.value.rgba[lo + 1]) << 8));
-        }
-      }
-
-      {
-        const auto centroidBytes = loadAsset(shNFiles.at(0).get<std::string>());
-        if (!centroidBytes.ok()) {
-          return StatusOr<GaussianSet>::Error("failed to read sog shN assets");
-        }
-        const auto centroids = DecodeImageFromMemoryWic(centroidBytes.value);
-        if (!centroids.ok()) {
-          return StatusOr<GaussianSet>::Error("failed to decode sog shN assets");
-        }
-
-        for (uint32_t i = 0; i < count; ++i) {
-          const uint32_t label = shLabels[i];
-          if (label >= paletteCount) {
-            continue;
-          }
-
-          for (uint32_t c = 0; c < coeffs; ++c) {
-            const uint32_t u = (label % 64u) * coeffs + c;
-            const uint32_t v = label / 64u;
-            if (u >= centroids.value.width || v >= centroids.value.height) {
-              continue;
-            }
-            const size_t co = (static_cast<size_t>(v) * centroids.value.width + u) * 4;
-            set.gaussians[i].sh[1 + c] = shNCodebook[centroids.value.rgba[co + 0]];
-            set.gaussians[i].sh[16 + 1 + c] = shNCodebook[centroids.value.rgba[co + 1]];
-            set.gaussians[i].sh[32 + 1 + c] = shNCodebook[centroids.value.rgba[co + 2]];
-          }
+        const size_t co = (static_cast<size_t>(v) * centroids.value.width + u) * 4;
+        if (legacyV1) {
+          set.gaussians[i].sh[1 + c] =
+              Lerp(shNMin, shNMax, static_cast<float>(centroids.value.rgba[co + 0]) / 255.0f);
+          set.gaussians[i].sh[16 + 1 + c] =
+              Lerp(shNMin, shNMax, static_cast<float>(centroids.value.rgba[co + 1]) / 255.0f);
+          set.gaussians[i].sh[32 + 1 + c] =
+              Lerp(shNMin, shNMax, static_cast<float>(centroids.value.rgba[co + 2]) / 255.0f);
+        } else {
+          set.gaussians[i].sh[1 + c] = shNCodebook[centroids.value.rgba[co + 0]];
+          set.gaussians[i].sh[16 + 1 + c] = shNCodebook[centroids.value.rgba[co + 1]];
+          set.gaussians[i].sh[32 + 1 + c] = shNCodebook[centroids.value.rgba[co + 2]];
         }
       }
     }
