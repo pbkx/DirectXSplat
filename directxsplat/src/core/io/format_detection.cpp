@@ -36,23 +36,23 @@ SceneFormat DetectSceneFormat(const std::string& path) try {
       return SceneFormat::Sog;
     }
   }
-  const std::string lower = ToLower(path);
-  if (EndsWith(lower, "lod-meta.json")) {
+  const std::string lowerName = ToLower(p.filename().string());
+  if (lowerName == "lod-meta.json") {
     return SceneFormat::HierarchicalLod;
   }
-  if (EndsWith(lower, ".compressed.ply")) {
+  if (EndsWith(lowerName, ".compressed.ply")) {
     return SceneFormat::CompressedPly;
   }
-  if (EndsWith(lower, ".ply")) {
+  if (EndsWith(lowerName, ".ply")) {
     return SceneFormat::Ply;
   }
-  if (EndsWith(lower, ".sog") || EndsWith(lower, "meta.json")) {
+  if (EndsWith(lowerName, ".sog") || lowerName == "meta.json") {
     return SceneFormat::Sog;
   }
-  if (EndsWith(lower, ".spz")) {
+  if (EndsWith(lowerName, ".spz")) {
     return SceneFormat::Spz;
   }
-  if (EndsWith(lower, ".splat")) {
+  if (EndsWith(lowerName, ".splat")) {
     return SceneFormat::Splat;
   }
   return SceneFormat::Unknown;

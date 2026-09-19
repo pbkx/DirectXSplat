@@ -258,6 +258,10 @@ TEST_CASE("scene format detection covers manifest and extension matrix") {
   for (const Case& testCase : cases) {
     CHECK(DetectSceneFormat(testCase.path) == testCase.expected);
   }
+  CHECK(DetectSceneFormat((dir / "META.JSON").string()) == SceneFormat::Sog);
+  CHECK(DetectSceneFormat((dir / "LOD-META.JSON").string()) == SceneFormat::HierarchicalLod);
+  CHECK(DetectSceneFormat((dir / "notmeta.json").string()) == SceneFormat::Unknown);
+  CHECK(DetectSceneFormat((dir / "notlod-meta.json").string()) == SceneFormat::Unknown);
   CHECK(DetectSceneFormat((dir / "scene.txt").string()) == SceneFormat::Unknown);
 
   std::error_code ec;
